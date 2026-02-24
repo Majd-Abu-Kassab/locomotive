@@ -1,0 +1,129 @@
+.pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-6);
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.pricing-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-xl);
+    padding: var(--space-8);
+    position: relative;
+    transition: all var(--transition-base);
+}
+
+.pricing-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+}
+
+.pricing-card.popular {
+    border-color: var(--brand-accent);
+    box-shadow: var(--shadow-glow-lg);
+    transform: scale(1.04);
+}
+
+.pricing-card.popular:hover {
+    transform: scale(1.04) translateY(-4px);
+}
+
+.pricing-card.current {
+    opacity: 0.7;
+}
+
+.popular-badge {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 16px;
+    background: var(--brand-accent);
+    color: white;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.savings-badge {
+    position: absolute;
+    top: var(--space-4);
+    right: var(--space-4);
+    padding: 2px 10px;
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--color-success);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    border-radius: var(--radius-full);
+}
+
+.pricing-header {
+    margin-bottom: var(--space-6);
+}
+
+.pricing-header h3 {
+    font-size: var(--fs-lg);
+    font-weight: 600;
+    margin-bottom: var(--space-3);
+    color: var(--text-secondary);
+}
+
+.pricing-price {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+}
+
+.price {
+    font-size: var(--fs-4xl);
+    font-weight: 800;
+}
+
+.period {
+    font-size: var(--fs-base);
+    color: var(--text-tertiary);
+}
+
+.pricing-features {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-bottom: var(--space-8);
+}
+
+.feature-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    font-size: var(--fs-sm);
+}
+
+.feature-item.included {
+    color: var(--text-primary);
+}
+
+.feature-item.included svg {
+    color: var(--color-success);
+    flex-shrink: 0;
+}
+
+.feature-item.excluded {
+    color: var(--text-tertiary);
+    text-decoration: line-through;
+}
+
+@media (max-width: 768px) {
+    .pricing-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pricing-card.popular {
+        transform: none;
+    }
+}
