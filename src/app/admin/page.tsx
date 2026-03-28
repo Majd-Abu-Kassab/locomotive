@@ -5,7 +5,7 @@ import AppLayout from '@/components/AppLayout';
 import {
     Plus, Trash2, Edit3, Save, X, Loader2, BookOpen, HelpCircle,
     AlertTriangle, Layers, Users, CreditCard, Tag, CheckCircle, XCircle,
-    Gift,
+    Gift, BarChart2, TrendingUp, TrendingDown, Activity, Award,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
@@ -16,11 +16,13 @@ import {
     adminSaveSection, adminDeleteSection, adminAssignModulesToSection, adminUpdateCoursePaymentSettings,
     adminGetAllStudentAccess, adminGrantAccess, adminRevokeAccess,
     adminGetAllPayments, adminGetCoupons, adminSaveCoupon, adminToggleCoupon,
+    adminGetPlatformStats, adminGetSubjectPerformance, adminGetQuestionAnalytics, adminGetStudentRoster,
     getCourseSections,
     CourseWithModules, QuestionRow, CourseSection, PaymentRow, CouponRow, StudentAccessRow,
+    PlatformStats, SubjectPerformance, QuestionAnalytics, StudentSummary,
 } from '@/lib/api';
 
-type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance';
+type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics';
 
 export default function AdminPage() {
     const { profile } = useAuth();
@@ -63,6 +65,14 @@ export default function AdminPage() {
     const [newCoupon, setNewCoupon] = useState<Partial<CouponRow>>({ type: 'percentage', value: 10, is_active: true });
     const [savingCoupon, setSavingCoupon] = useState(false);
 
+    // Analytics tab
+    const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
+    const [subjectPerf, setSubjectPerf] = useState<SubjectPerformance[]>([]);
+    const [questionAnalytics, setQuestionAnalytics] = useState<QuestionAnalytics[]>([]);
+    const [studentRoster, setStudentRoster] = useState<StudentSummary[]>([]);
+    const [qSortBy, setQSortBy] = useState<'hardest' | 'easiest' | 'mostAttempted'>('hardest');
+    const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
     useEffect(() => {
         async function load() {
             const [c, q] = await Promise.all([getCourses(), getAllQuestions()]);
@@ -89,7 +99,6 @@ export default function AdminPage() {
     useEffect(() => {
         if (tab === 'students') {
             adminGetAllStudentAccess().then(setStudentAccess);
-            // Load sections for all courses so the Grant dropdown is populated
             Promise.all(
                 courses.map(c =>
                     getCourseSections(c.id).then(sects =>
@@ -102,7 +111,22 @@ export default function AdminPage() {
             adminGetAllPayments().then(setPayments);
             adminGetCoupons().then(setCoupons);
         }
-    }, [tab, courses]);
+        if (tab === 'analytics') {
+            setAnalyticsLoading(true);
+            Promise.all([
+                adminGetPlatformStats(),
+                adminGetSubjectPerformance(),
+                adminGetQuestionAnalytics(30, qSortBy),
+                adminGetStudentRoster(),
+            ]).then(([stats, subj, qana, roster]) => {
+                setPlatformStats(stats);
+                setSubjectPerf(subj);
+                setQuestionAnalytics(qana);
+                setStudentRoster(roster);
+                setAnalyticsLoading(false);
+            });
+        }
+    }, [tab, courses, qSortBy]);
 
     if (!profile?.is_admin) {
         return (
@@ -309,6 +333,7 @@ export default function AdminPage() {
                         { key: 'sections', label: 'Sections & Pricing', icon: <Layers size={14} /> },
                         { key: 'students', label: 'Student Access', icon: <Users size={14} /> },
                         { key: 'finance', label: 'Finance', icon: <CreditCard size={14} /> },
+                        { key: 'analytics', label: 'Analytics', icon: <BarChart2 size={14} /> },
                     ] as { key: Tab; label: string; icon: React.ReactNode }[]).map(t => (
                         <button key={t.key} className={`admin-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
                             <span style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }}>{t.icon}</span>{t.label}
@@ -801,6 +826,164 @@ export default function AdminPage() {
                             {savingQuestion ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : <><Save size={16} /> Save Question</>}
                         </button>
                     </div>
+                </div>
+            )}
+
+            {/* ===== ANALYTICS TAB ===== */}
+            {tab === 'analytics' && (
+                <div>
+                    {analyticsLoading ? (
+                        <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-12)' }}>
+                            <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--text-tertiary)' }} />
+                        </div>
+                    ) : (
+                        <>
+                            {/* Platform KPIs */}
+                            {platformStats && (
+                                <div className="grid grid-4" style={{ marginBottom: 'var(--space-6)', gap: 'var(--space-4)' }}>
+                                    {[
+                                        { label: 'Total Students', value: platformStats.totalStudents, icon: <Users size={18} />, color: '#60a5fa' },
+                                        { label: 'Active This Week', value: platformStats.activeStudents, icon: <Activity size={18} />, color: '#34d399' },
+                                        { label: 'Avg Score %', value: `${platformStats.avgScore}%`, icon: <Award size={18} />, color: '#f59e0b' },
+                                        { label: 'Avg Correct Rate', value: `${platformStats.avgCorrectRate}%`, icon: <TrendingUp size={18} />, color: '#a78bfa' },
+                                        { label: 'Total Tests Taken', value: platformStats.totalTests, icon: <BarChart2 size={18} />, color: '#fb7185' },
+                                        { label: 'Topics Completed', value: platformStats.totalTopicsCompleted, icon: <CheckCircle size={18} />, color: '#34d399' },
+                                    ].map(({ label, value, icon, color }) => (
+                                        <div key={label} className="stat-card">
+                                            <div className="stat-icon" style={{ background: `${color}22`, color }}>{icon}</div>
+                                            <div className="stat-value">{value}</div>
+                                            <div className="stat-label">{label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-6)', marginBottom: 'var(--space-6)' }}>
+                                {/* Subject Performance */}
+                                <div className="card">
+                                    <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-5)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                        <BarChart2 size={18} /> Subject Performance
+                                    </h3>
+                                    {subjectPerf.length === 0 ? (
+                                        <p className="text-secondary text-sm">No test data yet.</p>
+                                    ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                                            {subjectPerf.map(s => {
+                                                const rate = s.avgCorrectRate;
+                                                const barColor = rate >= 70 ? '#34d399' : rate >= 50 ? '#f59e0b' : '#fb7185';
+                                                return (
+                                                    <div key={s.subject}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
+                                                            <span style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>{s.subject}</span>
+                                                            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-tertiary)' }}>
+                                                                {s.avgCorrectRate}% correct · {s.totalTests} tests
+                                                            </span>
+                                                        </div>
+                                                        <div className="progress-bar" style={{ height: 8 }}>
+                                                            <div className="progress-bar-fill" style={{ width: `${s.avgCorrectRate}%`, background: barColor, transition: 'width 0.6s ease' }} />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Student Roster */}
+                                <div className="card" style={{ overflow: 'hidden' }}>
+                                    <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                        <Users size={18} /> Student Roster
+                                    </h3>
+                                    <div style={{ overflowX: 'auto', maxHeight: 350, overflowY: 'auto' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fs-xs)' }}>
+                                            <thead>
+                                                <tr style={{ borderBottom: '1px solid var(--border-primary)' }}>
+                                                    {['Student', 'Tests', 'Avg Score', 'Correct%', 'Streak', 'Last Test'].map(h => (
+                                                        <th key={h} style={{ padding: 'var(--space-2)', textAlign: 'left', color: 'var(--text-tertiary)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {studentRoster.length === 0 ? (
+                                                    <tr><td colSpan={6} style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--text-tertiary)' }}>No students yet.</td></tr>
+                                                ) : studentRoster.map(s => (
+                                                    <tr key={s.userId} style={{ borderBottom: '1px solid var(--border-primary)' }}>
+                                                        <td style={{ padding: 'var(--space-2)' }}>
+                                                            <div style={{ fontWeight: 600 }}>{s.firstName} {s.lastName}</div>
+                                                            <div style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>{s.email}</div>
+                                                        </td>
+                                                        <td style={{ padding: 'var(--space-2)', textAlign: 'center' }}>{s.totalTests}</td>
+                                                        <td style={{ padding: 'var(--space-2)', textAlign: 'center', color: s.avgScore >= 60 ? '#34d399' : '#fb7185', fontWeight: 600 }}>{s.avgScore}%</td>
+                                                        <td style={{ padding: 'var(--space-2)', textAlign: 'center' }}>{s.avgCorrectRate}%</td>
+                                                        <td style={{ padding: 'var(--space-2)', textAlign: 'center' }}>🔥 {s.studyStreak}</td>
+                                                        <td style={{ padding: 'var(--space-2)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+                                                            {s.lastTestDate ? new Date(s.lastTestDate).toLocaleDateString() : '—'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Question Analytics */}
+                            <div className="card">
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+                                    <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                        <HelpCircle size={18} /> Question Intelligence
+                                    </h3>
+                                    <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                                        {(['hardest', 'easiest', 'mostAttempted'] as const).map(s => (
+                                            <button key={s} className={`btn btn-sm ${qSortBy === s ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setQSortBy(s)}>
+                                                {s === 'hardest' ? <><TrendingDown size={12} /> Hardest</> : s === 'easiest' ? <><TrendingUp size={12} /> Easiest</> : <><Activity size={12} /> Most Attempted</>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                {questionAnalytics.length === 0 ? (
+                                    <p className="text-secondary text-sm">No answer data yet — questions appear here once students take tests.</p>
+                                ) : (
+                                    <div className="table-wrapper">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Subject</th>
+                                                    <th>Topic</th>
+                                                    <th style={{ maxWidth: 280 }}>Question</th>
+                                                    <th>Difficulty</th>
+                                                    <th>Attempts</th>
+                                                    <th>Success Rate</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {questionAnalytics.map(q => {
+                                                    const rateColor = q.successRate >= 70 ? '#34d399' : q.successRate >= 40 ? '#f59e0b' : '#fb7185';
+                                                    return (
+                                                        <tr key={q.id}>
+                                                            <td style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{q.subject}</td>
+                                                            <td className="text-secondary text-sm">{q.topic}</td>
+                                                            <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 'var(--fs-xs)' }}>{q.stem}</td>
+                                                            <td><span className={`badge ${q.difficulty === 'easy' ? 'badge-success' : q.difficulty === 'hard' ? 'badge-danger' : ''}`}>{q.difficulty}</span></td>
+                                                            <td style={{ textAlign: 'center' }}>{q.totalAttempts}</td>
+                                                            <td>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                                                    <div className="progress-bar" style={{ width: 60, height: 6 }}>
+                                                                        <div className="progress-bar-fill" style={{ width: `${q.successRate}%`, background: rateColor }} />
+                                                                    </div>
+                                                                    <span style={{ fontWeight: 700, color: rateColor, fontSize: 'var(--fs-xs)' }}>{q.successRate}%</span>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    )}
                 </div>
             )}
         </AppLayout>

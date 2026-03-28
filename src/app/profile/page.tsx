@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/contexts/AuthContext';
-import { User, Mail, Lock, CreditCard, Save, Loader2, CheckCircle } from 'lucide-react';
+import { User, Mail, Lock, CreditCard, Save, Loader2, CheckCircle, Target, Calendar, BookOpen } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 
 export default function ProfilePage() {
@@ -21,11 +21,23 @@ export default function ProfilePage() {
     const [passwordSaving, setPasswordSaving] = useState(false);
     const [passwordSaved, setPasswordSaved] = useState(false);
 
+    // Study preferences state
+    const [focusSubjects, setFocusSubjects] = useState<string[]>([]);
+    const [examDate, setExamDate] = useState('');
+    const [studyHours, setStudyHours] = useState('2');
+    const [prefSaving, setPrefSaving] = useState(false);
+    const [prefSaved, setPrefSaved] = useState(false);
+
+    const ALL_SUBJECTS = ['Biology', 'Chemistry', 'Physics', 'Mathematics', 'Logic', 'General Knowledge', 'Reading'];
+
     useEffect(() => {
         if (profile) {
             setFirstName(profile.first_name || '');
             setLastName(profile.last_name || '');
             setEmail(profile.email || '');
+            setFocusSubjects(profile.focus_subjects || []);
+            setExamDate(profile.exam_date || '');
+            setStudyHours(String(profile.daily_study_hours || '2'));
         }
     }, [profile]);
 
@@ -38,6 +50,25 @@ export default function ProfilePage() {
         setSaving(false);
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
+    };
+
+    const toggleSubject = (s: string) => {
+        setFocusSubjects(prev =>
+            prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
+        );
+    };
+
+    const handleSavePreferences = async () => {
+        setPrefSaving(true);
+        setPrefSaved(false);
+        await updateProfile({
+            focus_subjects: focusSubjects,
+            exam_date: examDate || null,
+            daily_study_hours: parseInt(studyHours),
+        });
+        setPrefSaving(false);
+        setPrefSaved(true);
+        setTimeout(() => setPrefSaved(false), 3000);
     };
 
     const handleUpdatePassword = async () => {
@@ -135,6 +166,94 @@ export default function ProfilePage() {
                                 <><CheckCircle size={14} /> Saved!</>
                             ) : (
                                 <><Save size={14} /> Save Changes</>
+                            )}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Study Preferences */}
+                <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
+                    <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-5)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        <Target size={18} /> Study Preferences
+                    </h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+
+                        {/* Exam date + study hours */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+                            <div className="input-group">
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                    <Calendar size={14} /> IMAT Exam Date
+                                </label>
+                                <input
+                                    className="input"
+                                    type="date"
+                                    value={examDate}
+                                    onChange={e => setExamDate(e.target.value)}
+                                />
+                            </div>
+                            <div className="input-group">
+                                <label>Daily Study Hours</label>
+                                <select className="select" value={studyHours} onChange={e => setStudyHours(e.target.value)}>
+                                    <option value="1">1 hour</option>
+                                    <option value="2">2 hours</option>
+                                    <option value="3">3 hours</option>
+                                    <option value="4">4+ hours</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Focus subjects */}
+                        <div>
+                            <label style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+                                <BookOpen size={14} /> Focus Subjects
+                            </label>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-2)' }}>
+                                {ALL_SUBJECTS.map(s => {
+                                    const active = focusSubjects.includes(s);
+                                    return (
+                                        <button
+                                            key={s}
+                                            type="button"
+                                            onClick={() => toggleSubject(s)}
+                                            style={{
+                                                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                                                padding: 'var(--space-2) var(--space-3)',
+                                                background: active ? 'rgba(37,99,235,0.12)' : 'var(--bg-glass)',
+                                                border: `1px solid ${active ? 'var(--brand-accent)' : 'var(--border-primary)'}`,
+                                                borderRadius: 'var(--radius-md)',
+                                                color: active ? 'var(--brand-accent-light)' : 'var(--text-secondary)',
+                                                cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                                                fontSize: 'var(--fs-sm)', fontWeight: active ? 600 : 400,
+                                                transition: 'all var(--transition-fast)',
+                                            }}
+                                        >
+                                            <div style={{
+                                                width: 16, height: 16, borderRadius: '3px', flexShrink: 0,
+                                                border: `2px solid ${active ? 'var(--brand-accent)' : 'var(--border-primary)'}`,
+                                                background: active ? 'var(--brand-accent)' : 'transparent',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            }}>
+                                                {active && <CheckCircle size={10} color="white" />}
+                                            </div>
+                                            {s}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <button
+                            className="btn btn-primary btn-sm"
+                            style={{ alignSelf: 'flex-start' }}
+                            onClick={handleSavePreferences}
+                            disabled={prefSaving}
+                        >
+                            {prefSaving ? (
+                                <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</>
+                            ) : prefSaved ? (
+                                <><CheckCircle size={14} /> Saved!</>
+                            ) : (
+                                <><Save size={14} /> Save Preferences</>
                             )}
                         </button>
                     </div>

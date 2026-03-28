@@ -619,3 +619,184 @@ export async function validateCoupon(code: string, price: number): Promise<{ val
 
     return { valid: true, discount: Math.round(discount * 100) / 100, coupon, message: `${coupon.type === 'percentage' ? coupon.value + '%' : '€' + coupon.value} discount applied!` };
 }
+
+// ===== ADMIN ANALYTICS =====
+
+export interface PlatformStats {
+    totalStudents: number;
+    activeStudents: number; // tested in last 7 days
+    totalTests: number;
+    avgScore: number;
+    avgCorrectRate: number;
+    totalTopicsCompleted: number;
+}
+
+export interface SubjectPerformance {
+    subject: string;
+    totalAttempts: number;
+    avgScore: number;
+    avgCorrectRate: number;
+    totalTests: number;
+}
+
+export interface QuestionAnalytics {
+    id: string;
+    subject: string;
+    topic: string;
+    difficulty: string;
+    stem: string;
+    totalAttempts: number;
+    correctCount: number;
+    successRate: number; // 0-100
+}
+
+export interface StudentSummary {
+    userId: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    totalTests: number;
+    avgScore: number;
+    avgCorrectRate: number;
+    lastTestDate: string | null;
+    studyStreak: number;
+}
+
+export async function adminGetPlatformStats(): Promise<PlatformStats> {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [profilesRes, testsRes, recentUsersRes, progressRes] = await Promise.all([
+        supabase.from('profiles').select('id', { count: 'exact', head: true }),
+        supabase.from('test_results').select('score, max_score, correct, total_questions'),
+        supabase.from('test_results').select('user_id').gte('created_at', sevenDaysAgo),
+        supabase.from('user_topic_progress').select('id', { count: 'exact', head: true }).eq('completed', true),
+    ]);
+
+    const tests = testsRes.data || [];
+    const activeSet = new Set((recentUsersRes.data || []).map(r => r.user_id));
+
+    const avgScore = tests.length > 0
+        ? tests.reduce((sum, t) => sum + (t.max_score > 0 ? (t.score / t.max_score) * 100 : 0), 0) / tests.length
+        : 0;
+
+    const avgCorrectRate = tests.length > 0
+        ? tests.reduce((sum, t) => sum + (t.total_questions > 0 ? (t.correct / t.total_questions) * 100 : 0), 0) / tests.length
+        : 0;
+
+    return {
+        totalStudents: profilesRes.count ?? 0,
+        activeStudents: activeSet.size,
+        totalTests: tests.length,
+        avgScore: Math.round(avgScore * 10) / 10,
+        avgCorrectRate: Math.round(avgCorrectRate * 10) / 10,
+        totalTopicsCompleted: progressRes.count ?? 0,
+    };
+}
+
+export async function adminGetSubjectPerformance(): Promise<SubjectPerformance[]> {
+    const { data } = await supabase
+        .from('test_results')
+        .select('subjects, score, max_score, correct, total_questions');
+
+    if (!data || data.length === 0) return [];
+
+    const subjectMap: Record<string, { scores: number[]; correctRates: number[]; count: number }> = {};
+
+    for (const test of data) {
+        const subjects: string[] = Array.isArray(test.subjects) ? test.subjects : [];
+        const scoreRate = test.max_score > 0 ? (test.score / test.max_score) * 100 : 0;
+        const correctRate = test.total_questions > 0 ? (test.correct / test.total_questions) * 100 : 0;
+        for (const subject of subjects) {
+            if (!subjectMap[subject]) subjectMap[subject] = { scores: [], correctRates: [], count: 0 };
+            subjectMap[subject].scores.push(scoreRate);
+            subjectMap[subject].correctRates.push(correctRate);
+            subjectMap[subject].count++;
+        }
+    }
+
+    return Object.entries(subjectMap).map(([subject, { scores, correctRates, count }]) => ({
+        subject,
+        totalAttempts: count,
+        totalTests: count,
+        avgScore: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10,
+        avgCorrectRate: Math.round((correctRates.reduce((a, b) => a + b, 0) / correctRates.length) * 10) / 10,
+    })).sort((a, b) => b.totalAttempts - a.totalAttempts);
+}
+
+export async function adminGetQuestionAnalytics(limit = 30, sortBy: 'hardest' | 'easiest' | 'mostAttempted' = 'hardest'): Promise<QuestionAnalytics[]> {
+    // Get all test answers with question info
+    const { data } = await supabase
+        .from('test_answers')
+        .select('question_id, is_correct, questions!inner(id, subject, topic, difficulty, stem)');
+
+    if (!data || data.length === 0) return [];
+
+    // Aggregate per question
+    const qMap: Record<string, { correct: number; total: number; meta: { subject: string; topic: string; difficulty: string; stem: string } }> = {};
+
+    for (const row of data) {
+        const q = row as unknown as { question_id: string; is_correct: boolean; questions: { id: string; subject: string; topic: string; difficulty: string; stem: string } };
+        const id = q.question_id;
+        if (!qMap[id]) qMap[id] = { correct: 0, total: 0, meta: q.questions };
+        qMap[id].total++;
+        if (q.is_correct) qMap[id].correct++;
+    }
+
+    let results: QuestionAnalytics[] = Object.entries(qMap).map(([id, { correct, total, meta }]) => ({
+        id,
+        subject: meta.subject,
+        topic: meta.topic,
+        difficulty: meta.difficulty,
+        stem: meta.stem,
+        totalAttempts: total,
+        correctCount: correct,
+        successRate: Math.round((correct / total) * 1000) / 10,
+    }));
+
+    if (sortBy === 'hardest') results = results.sort((a, b) => a.successRate - b.successRate);
+    else if (sortBy === 'easiest') results = results.sort((a, b) => b.successRate - a.successRate);
+    else results = results.sort((a, b) => b.totalAttempts - a.totalAttempts);
+
+    return results.slice(0, limit);
+}
+
+export async function adminGetStudentRoster(): Promise<StudentSummary[]> {
+    const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, email, first_name, last_name, study_streak')
+        .order('created_at', { ascending: false });
+
+    if (!profiles || profiles.length === 0) return [];
+
+    const { data: tests } = await supabase
+        .from('test_results')
+        .select('user_id, score, max_score, correct, total_questions, created_at')
+        .order('created_at', { ascending: false });
+
+    const testsByUser: Record<string, typeof tests> = {};
+    for (const t of (tests || [])) {
+        if (!testsByUser[t.user_id]) testsByUser[t.user_id] = [];
+        testsByUser[t.user_id]!.push(t);
+    }
+
+    return profiles.map(p => {
+        const userTests = testsByUser[p.id] || [];
+        const avgScore = userTests.length > 0
+            ? userTests.reduce((sum, t) => sum + (t.max_score > 0 ? (t.score / t.max_score) * 100 : 0), 0) / userTests.length
+            : 0;
+        const avgCorrectRate = userTests.length > 0
+            ? userTests.reduce((sum, t) => sum + (t.total_questions > 0 ? (t.correct / t.total_questions) * 100 : 0), 0) / userTests.length
+            : 0;
+        return {
+            userId: p.id,
+            email: p.email || '',
+            firstName: p.first_name || '',
+            lastName: p.last_name || '',
+            totalTests: userTests.length,
+            avgScore: Math.round(avgScore * 10) / 10,
+            avgCorrectRate: Math.round(avgCorrectRate * 10) / 10,
+            lastTestDate: userTests[0]?.created_at || null,
+            studyStreak: p.study_streak || 0,
+        };
+    }).sort((a, b) => b.totalTests - a.totalTests);
+}

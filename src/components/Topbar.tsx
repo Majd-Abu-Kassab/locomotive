@@ -23,6 +23,12 @@ export default function Topbar() {
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
     const [allData, setAllData] = useState<CourseWithModules[]>([]);
     const [showSearch, setShowSearch] = useState(false);
+    const [notifications, setNotifications] = useState([
+        { id: 1, text: 'New IMAT 2025 questions available!', time: '2h ago', unread: true },
+        { id: 2, text: `Your study streak is growing! 🔥`, time: '5h ago', unread: true },
+        { id: 3, text: 'Biology module updated with new content', time: '1d ago', unread: false },
+    ]);
+    const hasUnread = notifications.some(n => n.unread);
     const searchRef = useRef<HTMLDivElement>(null);
 
     // Fall back to email from auth user if profile not loaded yet
@@ -103,17 +109,14 @@ export default function Topbar() {
         setShowSearch(results.length > 0);
     }, [allData]);
 
-    const notifications = [
-        { id: 1, text: 'New IMAT 2025 questions available!', time: '2h ago', unread: true },
-        { id: 2, text: `Your study streak is at ${profile?.study_streak || 0} days! 🔥`, time: '5h ago', unread: true },
-        { id: 3, text: 'Biology module updated with new content', time: '1d ago', unread: false },
-    ];
-
     const handleSignOut = async () => {
         setShowDropdown(false);
         await signOut();
-        // Hard redirect to clear all client state + bypass middleware
         window.location.href = '/login';
+    };
+
+    const markAllRead = () => {
+        setNotifications(prev => prev.map(n => ({ ...n, unread: false })));
     };
 
     return (
@@ -172,13 +175,20 @@ export default function Topbar() {
                         onClick={() => { setShowNotifications(!showNotifications); setShowDropdown(false); }}
                     >
                         <Bell size={18} />
-                        <span className="notification-dot" />
+                        {hasUnread && <span className="notification-dot" />}
                     </button>
                     {showNotifications && (
                         <div className="notification-dropdown">
                             <div className="notification-header">
                                 <span className="font-semibold">Notifications</span>
-                                <button className="text-sm text-accent" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-accent)' }}>Mark all read</button>
+                                <button
+                                    className="text-sm text-accent"
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--brand-accent-light)', fontSize: 'var(--fs-xs)' }}
+                                    onClick={markAllRead}
+                                    disabled={!hasUnread}
+                                >
+                                    Mark all read
+                                </button>
                             </div>
                             {notifications.map((n) => (
                                 <div key={n.id} className={`notification-item ${n.unread ? 'unread' : ''}`}>
