@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Search, Bell, User, ChevronDown, LogOut, Settings, BookOpen, HelpCircle, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCourses, CourseWithModules } from '@/lib/api';
@@ -17,8 +16,7 @@ interface SearchResult {
 }
 
 export default function Topbar() {
-    const router = useRouter();
-    const { profile, signOut } = useAuth();
+    const { profile, user, signOut } = useAuth();
     const [searchQuery, setSearchQuery] = useState('');
     const [showDropdown, setShowDropdown] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
@@ -27,8 +25,12 @@ export default function Topbar() {
     const [showSearch, setShowSearch] = useState(false);
     const searchRef = useRef<HTMLDivElement>(null);
 
-    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || 'User';
-    const displayEmail = profile?.email || '';
+    // Fall back to email from auth user if profile not loaded yet
+    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ')
+        || profile?.email?.split('@')[0]
+        || user?.email?.split('@')[0]
+        || 'User';
+    const displayEmail = profile?.email || user?.email || '';
 
     // Load searchable data once
     useEffect(() => {
@@ -110,7 +112,8 @@ export default function Topbar() {
     const handleSignOut = async () => {
         setShowDropdown(false);
         await signOut();
-        router.push('/login');
+        // Hard redirect to clear all client state + bypass middleware
+        window.location.href = '/login';
     };
 
     return (
