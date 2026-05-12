@@ -32,6 +32,8 @@ export interface TopicWithProgress {
     lesson_type: 'video' | 'pdf' | 'quiz';
     sort_order: number;
     completed: boolean;
+    content_url?: string | null;
+    content_type?: string | null;
 }
 
 export interface QuestionRow {
@@ -45,6 +47,7 @@ export interface QuestionRow {
     explanation: string;
     source: 'official-imat' | 'locomotive-original' | 'italian-medical';
     year: number | null;
+    image_url?: string | null;
 }
 
 export interface TestResultRow {
@@ -298,6 +301,38 @@ export async function adminDeleteCourse(courseId: string): Promise<{ error: Erro
     return { error: error ? new Error(error.message) : null };
 }
 
+export async function adminSaveModule(module: {
+    id: string;
+    course_id: string;
+    name: string;
+    sort_order: number;
+}): Promise<{ error: Error | null }> {
+    const { error } = await supabase.from('modules').upsert(module, { onConflict: 'id' });
+    return { error: error ? new Error(error.message) : null };
+}
+
+export async function adminDeleteModule(moduleId: string): Promise<{ error: Error | null }> {
+    const { error } = await supabase.from('modules').delete().eq('id', moduleId);
+    return { error: error ? new Error(error.message) : null };
+}
+
+export async function adminSaveTopic(topic: {
+    id: string;
+    module_id: string;
+    name: string;
+    question_count: number;
+    lesson_type: 'video' | 'pdf' | 'quiz';
+    sort_order: number;
+}): Promise<{ error: Error | null }> {
+    const { error } = await supabase.from('topics').upsert(topic, { onConflict: 'id' });
+    return { error: error ? new Error(error.message) : null };
+}
+
+export async function adminDeleteTopic(topicId: string): Promise<{ error: Error | null }> {
+    const { error } = await supabase.from('topics').delete().eq('id', topicId);
+    return { error: error ? new Error(error.message) : null };
+}
+
 export async function adminSaveQuestion(question: {
     id: string;
     subject: string;
@@ -309,6 +344,7 @@ export async function adminSaveQuestion(question: {
     explanation: string;
     source: string;
     year: number | null;
+    image_url?: string | null;
 }): Promise<{ error: Error | null }> {
     const dbQ = { ...question, options: JSON.stringify(question.options) };
     const { error } = await supabase.from('questions').upsert(dbQ, { onConflict: 'id' });
@@ -317,6 +353,31 @@ export async function adminSaveQuestion(question: {
 
 export async function adminDeleteQuestion(questionId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('questions').delete().eq('id', questionId);
+    return { error: error ? new Error(error.message) : null };
+}
+
+// ===== FILE UPLOADS =====
+
+export async function adminUploadCourseContent(file: File, courseId: string, topicId: string): Promise<{ url: string | null; error: Error | null }> {
+    const ext = file.name.split('.').pop();
+    const path = `${courseId}/${topicId}-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('course-content').upload(path, file, { upsert: true });
+    if (error) return { url: null, error: new Error(error.message) };
+    const { data } = supabase.storage.from('course-content').getPublicUrl(path);
+    return { url: data.publicUrl, error: null };
+}
+
+export async function adminUploadQuestionImage(file: File, questionId: string): Promise<{ url: string | null; error: Error | null }> {
+    const ext = file.name.split('.').pop();
+    const path = `${questionId}-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('question-images').upload(path, file, { upsert: true });
+    if (error) return { url: null, error: new Error(error.message) };
+    const { data } = supabase.storage.from('question-images').getPublicUrl(path);
+    return { url: data.publicUrl, error: null };
+}
+
+export async function adminUpdateTopicContent(topicId: string, contentUrl: string | null, contentType: string | null): Promise<{ error: Error | null }> {
+    const { error } = await supabase.from('topics').update({ content_url: contentUrl, content_type: contentType }).eq('id', topicId);
     return { error: error ? new Error(error.message) : null };
 }
 
@@ -799,4 +860,118 @@ export async function adminGetStudentRoster(): Promise<StudentSummary[]> {
             studyStreak: p.study_streak || 0,
         };
     }).sort((a, b) => b.totalTests - a.totalTests);
+}
+
+// ===== STUDENT ORDER HISTORY =====
+export interface StudentPaymentRow {
+    id: string;
+    amount: number;
+    currency: string;
+    status: 'pending' | 'paid' | 'failed' | 'refunded';
+    discount_amount: number;
+    paypal_order_id: string | null;
+    created_at: string;
+    paid_at: string | null;
+    section_name?: string;
+    course_name?: string;
+}
+
+export async function getStudentPayments(userId: string): Promise<StudentPaymentRow[]> {
+    const { data, error } = await supabase
+        .from('payments')
+        .select(`*, course_sections(name, course_id, courses(name))`)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+    if (error) { console.error('Error fetching student payments:', error); return []; }
+
+    return (data || []).map(row => ({
+        id: row.id,
+        amount: row.amount,
+        currency: row.currency,
+        status: row.status,
+        discount_amount: row.discount_amount || 0,
+        paypal_order_id: row.paypal_order_id,
+        created_at: row.created_at,
+        paid_at: row.paid_at,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        section_name: (row as any).course_sections?.name,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        course_name: (row as any).course_sections?.courses?.name,
+    }));
+}
+
+// ===== ADMIN ROLES & TEAM =====
+export type AdminRole = 'super_admin' | 'content_manager' | 'finance_manager' | 'analyst' | 'support';
+
+export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
+    super_admin: 'Super Admin',
+    content_manager: 'Content Manager',
+    finance_manager: 'Finance Manager',
+    analyst: 'Analyst',
+    support: 'Support Agent',
+};
+
+export const ADMIN_ROLE_DESCRIPTIONS: Record<AdminRole, string> = {
+    super_admin: 'Full access to everything, including team management',
+    content_manager: 'Courses, questions, content uploads, sections & pricing',
+    finance_manager: 'Payments, coupons, student access management',
+    analyst: 'Analytics dashboards, student roster, question intelligence',
+    support: 'Student access management, view payments',
+};
+
+// Which admin tabs each role can see
+export const ROLE_PERMISSIONS: Record<AdminRole, string[]> = {
+    super_admin: ['courses', 'questions', 'sections', 'students', 'finance', 'analytics', 'team'],
+    content_manager: ['courses', 'questions', 'sections'],
+    finance_manager: ['finance', 'students'],
+    analyst: ['analytics'],
+    support: ['students', 'finance'],
+};
+
+export interface TeamMember {
+    id: string;
+    email: string;
+    first_name: string | null;
+    last_name: string | null;
+    admin_role: AdminRole;
+    created_at: string;
+}
+
+export async function adminGetTeamMembers(): Promise<TeamMember[]> {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, first_name, last_name, admin_role, created_at')
+        .not('admin_role', 'is', null)
+        .order('created_at');
+
+    if (error) { console.error('Error fetching team:', error); return []; }
+    return (data || []) as TeamMember[];
+}
+
+export async function adminSetUserRole(userId: string, role: AdminRole): Promise<{ error: Error | null }> {
+    const { error } = await supabase
+        .from('profiles')
+        .update({ admin_role: role, is_admin: true })
+        .eq('id', userId);
+    return { error: error ? new Error(error.message) : null };
+}
+
+export async function adminRemoveUserRole(userId: string): Promise<{ error: Error | null }> {
+    const { error } = await supabase
+        .from('profiles')
+        .update({ admin_role: null, is_admin: false })
+        .eq('id', userId);
+    return { error: error ? new Error(error.message) : null };
+}
+
+export async function adminFindUserByEmail(email: string): Promise<{ id: string; email: string; first_name: string | null; last_name: string | null } | null> {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, first_name, last_name')
+        .ilike('email', email.trim())
+        .single();
+
+    if (error || !data) return null;
+    return data;
 }

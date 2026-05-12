@@ -1,12 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
 import {
     Plus, Trash2, Edit3, Save, X, Loader2, BookOpen, HelpCircle,
     AlertTriangle, Layers, Users, CreditCard, Tag, CheckCircle, XCircle,
     Gift, BarChart2, TrendingUp, TrendingDown, Activity, Award,
+    Upload, FileText, Image as ImageIcon, Shield, UserCog, Search, Crown,
+    ArrowLeft, FolderTree, Video, FileQuestion
 } from 'lucide-react';
+import { RichTextToolbar, RichTextPreview } from '@/components/RichTextEditor';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
 import {
@@ -17,12 +20,16 @@ import {
     adminGetAllStudentAccess, adminGrantAccess, adminRevokeAccess,
     adminGetAllPayments, adminGetCoupons, adminSaveCoupon, adminToggleCoupon,
     adminGetPlatformStats, adminGetSubjectPerformance, adminGetQuestionAnalytics, adminGetStudentRoster,
+    adminUploadQuestionImage, adminUploadCourseContent, adminUpdateTopicContent,
+    adminGetTeamMembers, adminSetUserRole, adminRemoveUserRole, adminFindUserByEmail,
+    adminSaveModule, adminDeleteModule, adminSaveTopic, adminDeleteTopic,
     getCourseSections,
-    CourseWithModules, QuestionRow, CourseSection, PaymentRow, CouponRow, StudentAccessRow,
+    CourseWithModules, ModuleWithTopics, TopicWithProgress, QuestionRow, CourseSection, PaymentRow, CouponRow, StudentAccessRow,
     PlatformStats, SubjectPerformance, QuestionAnalytics, StudentSummary,
+    AdminRole, ADMIN_ROLE_LABELS, ADMIN_ROLE_DESCRIPTIONS, ROLE_PERMISSIONS, TeamMember,
 } from '@/lib/api';
 
-type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics';
+type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics' | 'team';
 
 export default function AdminPage() {
     const { profile } = useAuth();
@@ -34,12 +41,26 @@ export default function AdminPage() {
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [editingCourse, setEditingCourse] = useState<Partial<CourseWithModules> | null>(null);
     const [savingCourse, setSavingCourse] = useState(false);
+    
+    // Modules/Topics state
+    const [managingCourseStructure, setManagingCourseStructure] = useState<string | null>(null);
+    const [editingModule, setEditingModule] = useState<Partial<ModuleWithTopics> | null>(null);
+    const [savingModule, setSavingModule] = useState(false);
+    const [editingTopic, setEditingTopic] = useState<Partial<TopicWithProgress> | null>(null);
+    const [savingTopic, setSavingTopic] = useState(false);
 
     // Questions tab
     const [questions, setQuestions] = useState<QuestionRow[]>([]);
     const [editingQuestion, setEditingQuestion] = useState<Partial<QuestionRow> | null>(null);
     const [savingQuestion, setSavingQuestion] = useState(false);
     const [questionFilter, setQuestionFilter] = useState('');
+    const stemRef = useRef<HTMLTextAreaElement>(null);
+    const explanationRef = useRef<HTMLTextAreaElement>(null);
+
+    // Content upload state
+    const [uploadingContent, setUploadingContent] = useState(false);
+    const [contentCourseId, setContentCourseId] = useState('');
+    const [contentTopicId, setContentTopicId] = useState('');
 
     // Sections tab
     const [selectedCourseId, setSelectedCourseId] = useState('');
@@ -72,6 +93,27 @@ export default function AdminPage() {
     const [studentRoster, setStudentRoster] = useState<StudentSummary[]>([]);
     const [qSortBy, setQSortBy] = useState<'hardest' | 'easiest' | 'mostAttempted'>('hardest');
     const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
+    // Team tab
+    const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+    const [teamEmail, setTeamEmail] = useState('');
+    const [teamRole, setTeamRole] = useState<AdminRole>('content_manager');
+    const [teamSearchResult, setTeamSearchResult] = useState<{ id: string; email: string; first_name: string | null; last_name: string | null } | null>(null);
+    const [teamSearching, setTeamSearching] = useState(false);
+    const [teamSaving, setTeamSaving] = useState(false);
+
+    // Role-based permissions
+    const userRole = profile?.admin_role as AdminRole | null;
+    const allowedTabs = userRole ? ROLE_PERMISSIONS[userRole] || [] : [];
+    const canSeeTab = (t: string) => allowedTabs.includes(t);
+
+    // Set initial tab to first allowed tab
+    useEffect(() => {
+        if (allowedTabs.length > 0 && !canSeeTab(tab)) {
+            setTab(allowedTabs[0] as Tab);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userRole]);
 
     useEffect(() => {
         async function load() {
@@ -126,9 +168,12 @@ export default function AdminPage() {
                 setAnalyticsLoading(false);
             });
         }
+        if (tab === 'team') {
+            adminGetTeamMembers().then(setTeamMembers);
+        }
     }, [tab, courses, qSortBy]);
 
-    if (!profile?.is_admin) {
+    if (!profile?.admin_role) {
         return (
             <AppLayout>
                 <div className="page-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', textAlign: 'center' }}>
@@ -171,6 +216,64 @@ export default function AdminPage() {
         }
     };
 
+    // ===== MODULE HANDLERS =====
+    const handleSaveModule = async () => {
+        if (!editingModule || !managingCourseStructure || !editingModule.name) return;
+        setSavingModule(true);
+        const id = editingModule.id || editingModule.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const { error } = await adminSaveModule({
+            id,
+            course_id: managingCourseStructure,
+            name: editingModule.name,
+            sort_order: editingModule.sort_order || 0,
+        });
+        if (error) { addToast(error.message, 'error'); } else {
+            addToast('Module saved', 'success');
+            setCourses(await getCourses());
+            setEditingModule(null);
+        }
+        setSavingModule(false);
+    };
+
+    const handleDeleteModule = async (moduleId: string) => {
+        if (!confirm('Delete this module and all its topics?')) return;
+        const { error } = await adminDeleteModule(moduleId);
+        if (error) { addToast(error.message, 'error'); } else {
+            addToast('Module deleted', 'success');
+            setCourses(await getCourses());
+        }
+    };
+
+    // ===== TOPIC HANDLERS =====
+    const handleSaveTopic = async () => {
+        if (!editingTopic || !editingTopic.module_id || !editingTopic.name) return;
+        setSavingTopic(true);
+        const id = editingTopic.id || editingTopic.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const { error } = await adminSaveTopic({
+            id,
+            module_id: editingTopic.module_id,
+            name: editingTopic.name,
+            lesson_type: editingTopic.lesson_type || 'video',
+            question_count: editingTopic.question_count || 0,
+            sort_order: editingTopic.sort_order || 0,
+        });
+        if (error) { addToast(error.message, 'error'); } else {
+            addToast('Topic saved', 'success');
+            setCourses(await getCourses());
+            setEditingTopic(null);
+        }
+        setSavingTopic(false);
+    };
+
+    const handleDeleteTopic = async (topicId: string) => {
+        if (!confirm('Delete this topic?')) return;
+        const { error } = await adminDeleteTopic(topicId);
+        if (error) { addToast(error.message, 'error'); } else {
+            addToast('Topic deleted', 'success');
+            setCourses(await getCourses());
+        }
+    };
+
     // ===== QUESTION HANDLERS =====
     const handleSaveQuestion = async () => {
         if (!editingQuestion || !editingQuestion.id || !editingQuestion.stem) return;
@@ -186,6 +289,7 @@ export default function AdminPage() {
             explanation: editingQuestion.explanation || '',
             source: editingQuestion.source || 'locomotive-original',
             year: editingQuestion.year || null,
+            image_url: editingQuestion.image_url || null,
         });
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Question saved!', 'success');
@@ -201,6 +305,33 @@ export default function AdminPage() {
             addToast('Question deleted', 'success');
             setQuestions(prev => prev.filter(q => q.id !== qId));
         }
+    };
+
+    const handleQuestionImageUpload = async (file: File): Promise<string | null> => {
+        if (!editingQuestion?.id) { addToast('Save question ID first', 'error'); return null; }
+        const { url, error } = await adminUploadQuestionImage(file, editingQuestion.id);
+        if (error) { addToast(error.message, 'error'); return null; }
+        if (url) setEditingQuestion(prev => prev ? { ...prev, image_url: url } : prev);
+        addToast('Image uploaded!', 'success');
+        return url;
+    };
+
+    const handleContentUpload = async (file: File) => {
+        if (!contentCourseId || !contentTopicId) { addToast('Select course and topic first', 'error'); return; }
+        setUploadingContent(true);
+        const { url, error } = await adminUploadCourseContent(file, contentCourseId, contentTopicId);
+        if (error) { addToast(error.message, 'error'); setUploadingContent(false); return; }
+        if (url) {
+            const ext = file.name.split('.').pop()?.toLowerCase();
+            const contentType = ext === 'pdf' ? 'pdf' : (ext === 'pptx' || ext === 'ppt') ? 'presentation' : 'file';
+            const { error: updateErr } = await adminUpdateTopicContent(contentTopicId, url, contentType);
+            if (updateErr) { addToast(updateErr.message, 'error'); }
+            else {
+                addToast(`${contentType === 'pdf' ? 'PDF' : 'Presentation'} uploaded successfully!`, 'success');
+                setCourses(await getCourses());
+            }
+        }
+        setUploadingContent(false);
     };
 
     // ===== SECTION HANDLERS =====
@@ -298,7 +429,15 @@ export default function AdminPage() {
             <div className="page-wrapper">
                 <div className="page-header">
                     <h1>Admin Panel</h1>
-                    <p>Manage courses, payments, access, and content</p>
+                    <p style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        Manage courses, payments, access, and content
+                        {userRole && (
+                            <span className="badge" style={{ background: 'rgba(168,85,247,0.15)', color: '#c084fc', marginLeft: 'var(--space-2)' }}>
+                                <Shield size={10} style={{ display: 'inline', marginRight: 2 }} />
+                                {ADMIN_ROLE_LABELS[userRole]}
+                            </span>
+                        )}
+                    </p>
                 </div>
 
                 {/* Stats */}
@@ -325,7 +464,7 @@ export default function AdminPage() {
                     </div>
                 </div>
 
-                {/* Tabs */}
+                {/* Tabs — filtered by role */}
                 <div className="admin-tabs" style={{ flexWrap: 'wrap' }}>
                     {([
                         { key: 'courses', label: 'Courses', icon: <BookOpen size={14} /> },
@@ -334,7 +473,8 @@ export default function AdminPage() {
                         { key: 'students', label: 'Student Access', icon: <Users size={14} /> },
                         { key: 'finance', label: 'Finance', icon: <CreditCard size={14} /> },
                         { key: 'analytics', label: 'Analytics', icon: <BarChart2 size={14} /> },
-                    ] as { key: Tab; label: string; icon: React.ReactNode }[]).map(t => (
+                        { key: 'team', label: 'Team', icon: <UserCog size={14} /> },
+                    ] as { key: Tab; label: string; icon: React.ReactNode }[]).filter(t => canSeeTab(t.key)).map(t => (
                         <button key={t.key} className={`admin-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
                             <span style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }}>{t.icon}</span>{t.label}
                         </button>
@@ -344,32 +484,208 @@ export default function AdminPage() {
                 {/* ===== COURSES TAB ===== */}
                 {tab === 'courses' && (
                     <div>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-4)' }}>
-                            <button className="btn btn-primary btn-sm" onClick={() => setEditingCourse({ id: '', name: '', icon: '📚', color: '#2563EB', description: '', total_lessons: 0, total_questions: 0, sort_order: courses.length })}>
-                                <Plus size={14} /> Add Course
-                            </button>
-                        </div>
-                        <div className="table-wrapper">
-                            <table>
-                                <thead><tr><th>Icon</th><th>Name</th><th>ID</th><th>Lessons</th><th>Questions</th><th>Actions</th></tr></thead>
-                                <tbody>
-                                    {courses.map(course => (
-                                        <tr key={course.id}>
-                                            <td>{course.icon}</td>
-                                            <td style={{ fontWeight: 500 }}>{course.name}</td>
-                                            <td className="text-secondary text-xs">{course.id}</td>
-                                            <td>{course.total_lessons}</td>
-                                            <td>{course.total_questions}</td>
-                                            <td>
-                                                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                                                    <button className="btn btn-ghost btn-sm" onClick={() => setEditingCourse(course)}><Edit3 size={14} /></button>
-                                                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={() => handleDeleteCourse(course.id)}><Trash2 size={14} /></button>
+                        {managingCourseStructure ? (() => {
+                            const course = courses.find(c => c.id === managingCourseStructure);
+                            if (!course) return null;
+                            return (
+                                <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-6)' }}>
+                                        <button className="btn btn-secondary btn-sm" onClick={() => setManagingCourseStructure(null)}>
+                                            <ArrowLeft size={14} /> Back to Courses
+                                        </button>
+                                        <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                            {course.icon} {course.name} Structure
+                                        </h2>
+                                        <button className="btn btn-primary btn-sm" onClick={() => setEditingModule({ id: '', course_id: course.id, name: '', sort_order: (course.modules?.length || 0) + 1 })}>
+                                            <Plus size={14} /> Add Module
+                                        </button>
+                                    </div>
+                                    
+                                    {(!course.modules || course.modules.length === 0) ? (
+                                        <div className="card" style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--text-tertiary)' }}>
+                                            <FolderTree size={32} style={{ margin: '0 auto var(--space-3)' }} />
+                                            <p>No modules yet. Add a module to start organizing your course.</p>
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                                            {course.modules.sort((a,b) => a.sort_order - b.sort_order).map(mod => (
+                                                <div key={mod.id} className="card" style={{ padding: 'var(--space-4)' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-primary)', paddingBottom: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+                                                        <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                                            <FolderTree size={16} style={{ color: 'var(--brand-accent)' }} /> {mod.name}
+                                                        </h3>
+                                                        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                                                            <button className="btn btn-secondary btn-sm" onClick={() => setEditingTopic({ id: '', module_id: mod.id, name: '', lesson_type: 'video', question_count: 0, sort_order: (mod.topics?.length || 0) + 1 })}>
+                                                                <Plus size={14} /> Add Topic
+                                                            </button>
+                                                            <button className="btn btn-ghost btn-sm" onClick={() => setEditingModule(mod)}><Edit3 size={14} /></button>
+                                                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={() => handleDeleteModule(mod.id)}><Trash2 size={14} /></button>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    {(!mod.topics || mod.topics.length === 0) ? (
+                                                        <p className="text-secondary text-sm" style={{ padding: 'var(--space-2)', textAlign: 'center', fontStyle: 'italic' }}>No topics in this module yet.</p>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                                                            {mod.topics.sort((a,b) => a.sort_order - b.sort_order).map(topic => (
+                                                                <div key={topic.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-glass)', padding: 'var(--space-2) var(--space-4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-primary)' }}>
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                                                                        {topic.lesson_type === 'video' ? <Video size={14} style={{ color: '#ef4444' }} /> : topic.lesson_type === 'pdf' ? <FileText size={14} style={{ color: '#3b82f6' }} /> : <FileQuestion size={14} style={{ color: '#10b981' }} />}
+                                                                        <span style={{ fontWeight: 500, fontSize: 'var(--fs-sm)' }}>{topic.name}</span>
+                                                                        {topic.lesson_type === 'quiz' && <span className="badge badge-success" style={{ fontSize: 9 }}>{topic.question_count} Qs</span>}
+                                                                        {topic.content_url && <span className="badge badge-accent" style={{ fontSize: 9 }}>Content Uploaded</span>}
+                                                                    </div>
+                                                                    <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+                                                                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px' }} onClick={() => setEditingTopic(topic)}><Edit3 size={14} /></button>
+                                                                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px', color: 'var(--color-danger)' }} onClick={() => handleDeleteTopic(topic.id)}><Trash2 size={14} /></button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })() : (
+                            <>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-4)' }}>
+                                    <button className="btn btn-primary btn-sm" onClick={() => setEditingCourse({ id: '', name: '', icon: '📚', color: '#2563EB', description: '', total_lessons: 0, total_questions: 0, sort_order: courses.length })}>
+                                        <Plus size={14} /> Add Course
+                                    </button>
+                                </div>
+                                <div className="table-wrapper">
+                                    <table>
+                                        <thead><tr><th>Icon</th><th>Name</th><th>ID</th><th>Lessons</th><th>Questions</th><th>Actions</th></tr></thead>
+                                        <tbody>
+                                            {courses.map(course => (
+                                                <tr key={course.id}>
+                                                    <td>{course.icon}</td>
+                                                    <td style={{ fontWeight: 500 }}>{course.name}</td>
+                                                    <td className="text-secondary text-xs">{course.id}</td>
+                                                    <td>{course.total_lessons}</td>
+                                                    <td>{course.total_questions}</td>
+                                                    <td>
+                                                        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                                                            <button className="btn btn-secondary btn-sm" onClick={() => setManagingCourseStructure(course.id)}><FolderTree size={14} /> Structure</button>
+                                                            <button className="btn btn-ghost btn-sm" onClick={() => setEditingCourse(course)}><Edit3 size={14} /></button>
+                                                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={() => handleDeleteCourse(course.id)}><Trash2 size={14} /></button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Content Upload */}
+                        <div className="card" style={{ marginTop: 'var(--space-6)' }}>
+                            <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                <Upload size={18} /> Upload Presentations & PDFs
+                            </h3>
+                            <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-4)' }}>
+                                Upload PDF study materials or PowerPoint presentations to any topic. Max 50MB per file.
+                            </p>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
+                                <div className="input-group">
+                                    <label>Course</label>
+                                    <select className="select" value={contentCourseId} onChange={e => { setContentCourseId(e.target.value); setContentTopicId(''); }}>
+                                        <option value="">Select course...</option>
+                                        {courses.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="input-group">
+                                    <label>Topic</label>
+                                    <select className="select" value={contentTopicId} onChange={e => setContentTopicId(e.target.value)} disabled={!contentCourseId}>
+                                        <option value="">Select topic...</option>
+                                        {contentCourseId && courses.find(c => c.id === contentCourseId)?.modules.flatMap(m =>
+                                            m.topics.map(t => (
+                                                <option key={t.id} value={t.id}>{m.name} → {t.name} ({t.lesson_type})</option>
+                                            ))
+                                        )}
+                                    </select>
+                                </div>
+                            </div>
+                            <div
+                                style={{
+                                    border: '2px dashed var(--border-primary)',
+                                    borderRadius: 'var(--radius-md)',
+                                    padding: 'var(--space-8)',
+                                    textAlign: 'center',
+                                    background: 'var(--bg-glass)',
+                                    cursor: contentCourseId && contentTopicId ? 'pointer' : 'not-allowed',
+                                    opacity: contentCourseId && contentTopicId ? 1 : 0.5,
+                                    transition: 'all 0.15s ease',
+                                    position: 'relative',
+                                }}
+                                onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--brand-accent)'; }}
+                                onDragLeave={e => { e.currentTarget.style.borderColor = 'var(--border-primary)'; }}
+                                onDrop={e => {
+                                    e.preventDefault();
+                                    e.currentTarget.style.borderColor = 'var(--border-primary)';
+                                    const file = e.dataTransfer.files[0];
+                                    if (file) handleContentUpload(file);
+                                }}
+                                onClick={() => {
+                                    if (!contentCourseId || !contentTopicId) return;
+                                    const input = document.createElement('input');
+                                    input.type = 'file';
+                                    input.accept = '.pdf,.pptx,.ppt';
+                                    input.onchange = (e) => {
+                                        const file = (e.target as HTMLInputElement).files?.[0];
+                                        if (file) handleContentUpload(file);
+                                    };
+                                    input.click();
+                                }}
+                            >
+                                {uploadingContent ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-3)' }}>
+                                        <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--brand-accent-light)' }} />
+                                        <span>Uploading...</span>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <Upload size={32} style={{ color: 'var(--text-tertiary)', marginBottom: 'var(--space-2)' }} />
+                                        <p style={{ fontWeight: 600, marginBottom: 'var(--space-1)' }}>Drop file here or click to browse</p>
+                                        <p className="text-xs text-secondary">PDF, PPTX • Max 50MB</p>
+                                    </>
+                                )}
+                            </div>
+
+                            {/* Show topics with uploaded content */}
+                            {contentCourseId && (() => {
+                                const c = courses.find(cc => cc.id === contentCourseId);
+                                const uploaded = c?.modules.flatMap(m => m.topics.filter(t => t.content_url)) || [];
+                                if (uploaded.length === 0) return null;
+                                return (
+                                    <div style={{ marginTop: 'var(--space-4)' }}>
+                                        <label style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-2)', display: 'block' }}>
+                                            Uploaded Content ({uploaded.length} files)
+                                        </label>
+                                        {uploaded.map(t => (
+                                            <div key={t.id} style={{
+                                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                                padding: 'var(--space-2) var(--space-3)', background: 'var(--bg-glass)',
+                                                borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-1)',
+                                                fontSize: 'var(--fs-xs)',
+                                            }}>
+                                                <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                                    <FileText size={14} style={{ color: 'var(--color-warning)' }} />
+                                                    <strong>{t.name}</strong>
+                                                    <span className="badge" style={{ fontSize: 9 }}>{t.content_type}</span>
+                                                </span>
+                                                <a href={t.content_url!} target="_blank" rel="noopener noreferrer" className="text-accent" style={{ fontSize: 'var(--fs-xs)' }}>
+                                                    View ↗
+                                                </a>
+                                            </div>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 )}
@@ -808,7 +1124,40 @@ export default function AdminPage() {
                                 </div>
                                 <div className="input-group"><label>Year</label><input className="input" type="number" value={editingQuestion.year || ''} onChange={e => setEditingQuestion({ ...editingQuestion, year: e.target.value ? parseInt(e.target.value) : null })} placeholder="2024" /></div>
                             </div>
-                            <div className="input-group"><label>Question Stem</label><textarea className="input" rows={3} value={editingQuestion.stem || ''} onChange={e => setEditingQuestion({ ...editingQuestion, stem: e.target.value })} placeholder="Write the question here..." style={{ resize: 'vertical', fontFamily: 'inherit' }} /></div>
+                            <div className="input-group">
+                                <label>Question Stem</label>
+                                <RichTextToolbar
+                                    textareaRef={stemRef}
+                                    value={editingQuestion.stem || ''}
+                                    onChange={val => setEditingQuestion({ ...editingQuestion, stem: val })}
+                                    onImageUpload={handleQuestionImageUpload}
+                                />
+                                <textarea
+                                    ref={stemRef}
+                                    className="input"
+                                    rows={4}
+                                    value={editingQuestion.stem || ''}
+                                    onChange={e => setEditingQuestion({ ...editingQuestion, stem: e.target.value })}
+                                    placeholder="Write the question here... Use **bold**, *italic*, $LaTeX$, ^{sup}, _{sub}"
+                                    style={{ resize: 'vertical', fontFamily: 'inherit', borderRadius: '0 0 var(--radius-md) var(--radius-md)' }}
+                                />
+                                {editingQuestion.stem && (
+                                    <div style={{ padding: 'var(--space-3)', background: 'var(--bg-glass)', border: '1px solid var(--border-primary)', borderTop: 'none', borderRadius: '0 0 var(--radius-md) var(--radius-md)', fontSize: 'var(--fs-sm)', lineHeight: 1.6 }}>
+                                        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-tertiary)', display: 'block', marginBottom: 'var(--space-1)' }}>Preview:</span>
+                                        <RichTextPreview text={editingQuestion.stem} />
+                                    </div>
+                                )}
+                            </div>
+                            {/* Question image */}
+                            {editingQuestion.image_url && (
+                                <div style={{ padding: 'var(--space-3)', background: 'var(--bg-glass)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-2)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                                        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-tertiary)' }}><ImageIcon size={12} style={{ display: 'inline', verticalAlign: 'middle' }} /> Attached Image</span>
+                                        <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)', fontSize: 'var(--fs-xs)' }} onClick={() => setEditingQuestion({ ...editingQuestion, image_url: null })}>Remove</button>
+                                    </div>
+                                    <img src={editingQuestion.image_url} alt="Question diagram" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 'var(--radius-sm)', objectFit: 'contain' }} />
+                                </div>
+                            )}
                             <div>
                                 <label style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', marginBottom: 'var(--space-2)', display: 'block' }}>Options (click letter = correct)</label>
                                 {(editingQuestion.options || ['', '', '', '', '']).map((opt, i) => (
@@ -820,7 +1169,23 @@ export default function AdminPage() {
                                     </div>
                                 ))}
                             </div>
-                            <div className="input-group"><label>Explanation</label><textarea className="input" rows={2} value={editingQuestion.explanation || ''} onChange={e => setEditingQuestion({ ...editingQuestion, explanation: e.target.value })} style={{ resize: 'vertical', fontFamily: 'inherit' }} /></div>
+                            <div className="input-group">
+                                <label>Explanation</label>
+                                <RichTextToolbar
+                                    textareaRef={explanationRef}
+                                    value={editingQuestion.explanation || ''}
+                                    onChange={val => setEditingQuestion({ ...editingQuestion, explanation: val })}
+                                    onImageUpload={handleQuestionImageUpload}
+                                />
+                                <textarea
+                                    ref={explanationRef}
+                                    className="input"
+                                    rows={2}
+                                    value={editingQuestion.explanation || ''}
+                                    onChange={e => setEditingQuestion({ ...editingQuestion, explanation: e.target.value })}
+                                    style={{ resize: 'vertical', fontFamily: 'inherit', borderRadius: '0 0 var(--radius-md) var(--radius-md)' }}
+                                />
+                            </div>
                         </div>
                         <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-5)' }} onClick={handleSaveQuestion} disabled={savingQuestion || !editingQuestion.id || !editingQuestion.stem}>
                             {savingQuestion ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : <><Save size={16} /> Save Question</>}
@@ -830,7 +1195,7 @@ export default function AdminPage() {
             )}
 
             {/* ===== ANALYTICS TAB ===== */}
-            {tab === 'analytics' && (
+            {tab === 'analytics' && canSeeTab('analytics') && (
                 <div>
                     {analyticsLoading ? (
                         <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-12)' }}>
@@ -984,6 +1349,295 @@ export default function AdminPage() {
                             </div>
                         </>
                     )}
+                </div>
+            )}
+            {/* ===== TEAM TAB ===== */}
+            {tab === 'team' && canSeeTab('team') && (
+                <div>
+                    {/* Role assignment form */}
+                    <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
+                        <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                            <UserCog size={18} /> Assign Admin Role
+                        </h3>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                            {/* Step 1: Find user by email */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 'var(--space-3)', alignItems: 'end' }}>
+                                <div className="input-group">
+                                    <label>User Email</label>
+                                    <input
+                                        className="input"
+                                        value={teamEmail}
+                                        onChange={e => { setTeamEmail(e.target.value); setTeamSearchResult(null); }}
+                                        placeholder="Enter user's email address"
+                                        onKeyDown={e => e.key === 'Enter' && teamEmail.trim() && (async () => {
+                                            setTeamSearching(true);
+                                            const r = await adminFindUserByEmail(teamEmail);
+                                            setTeamSearchResult(r);
+                                            setTeamSearching(false);
+                                            if (!r) addToast('User not found with that email', 'error');
+                                        })()}
+                                    />
+                                </div>
+                                <button
+                                    className="btn btn-secondary btn-sm"
+                                    disabled={!teamEmail.trim() || teamSearching}
+                                    onClick={async () => {
+                                        setTeamSearching(true);
+                                        const r = await adminFindUserByEmail(teamEmail);
+                                        setTeamSearchResult(r);
+                                        setTeamSearching(false);
+                                        if (!r) addToast('User not found with that email', 'error');
+                                    }}
+                                >
+                                    {teamSearching ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={14} />}
+                                    Find User
+                                </button>
+                            </div>
+
+                            {/* Step 2: Found user — assign role */}
+                            {teamSearchResult && (
+                                <div style={{
+                                    padding: 'var(--space-4)', background: 'rgba(16,185,129,0.06)',
+                                    border: '1px solid rgba(16,185,129,0.2)', borderRadius: 'var(--radius-md)',
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+                                        <CheckCircle size={16} style={{ color: 'var(--color-success)' }} />
+                                        <div>
+                                            <div style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+                                                {teamSearchResult.first_name || ''} {teamSearchResult.last_name || ''}
+                                            </div>
+                                            <div className="text-xs text-secondary">{teamSearchResult.email}</div>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 'var(--space-3)', alignItems: 'end' }}>
+                                        <div className="input-group">
+                                            <label>Role</label>
+                                            <select className="select" value={teamRole} onChange={e => setTeamRole(e.target.value as AdminRole)}>
+                                                {(Object.keys(ADMIN_ROLE_LABELS) as AdminRole[]).map(r => (
+                                                    <option key={r} value={r}>{ADMIN_ROLE_LABELS[r]}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <button
+                                            className="btn btn-primary btn-sm"
+                                            disabled={teamSaving}
+                                            onClick={async () => {
+                                                setTeamSaving(true);
+                                                const { error } = await adminSetUserRole(teamSearchResult.id, teamRole);
+                                                if (error) { addToast(error.message, 'error'); }
+                                                else {
+                                                    addToast(`${ADMIN_ROLE_LABELS[teamRole]} role assigned!`, 'success');
+                                                    setTeamEmail('');
+                                                    setTeamSearchResult(null);
+                                                    setTeamMembers(await adminGetTeamMembers());
+                                                }
+                                                setTeamSaving(false);
+                                            }}
+                                        >
+                                            {teamSaving ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Shield size={14} />}
+                                            Assign Role
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-secondary" style={{ marginTop: 'var(--space-2)' }}>
+                                        {ADMIN_ROLE_DESCRIPTIONS[teamRole]}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Role reference */}
+                    <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
+                        <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                            <Shield size={18} /> Role Permissions
+                        </h3>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--space-3)' }}>
+                            {(Object.keys(ADMIN_ROLE_LABELS) as AdminRole[]).map(r => (
+                                <div key={r} style={{
+                                    padding: 'var(--space-4)', background: 'var(--bg-glass)',
+                                    border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)',
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                                        <Crown size={14} style={{ color: r === 'super_admin' ? '#f59e0b' : 'var(--brand-accent-light)' }} />
+                                        <span style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>{ADMIN_ROLE_LABELS[r]}</span>
+                                    </div>
+                                    <p className="text-xs text-secondary" style={{ marginBottom: 'var(--space-2)' }}>
+                                        {ADMIN_ROLE_DESCRIPTIONS[r]}
+                                    </p>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+                                        {ROLE_PERMISSIONS[r].map(p => (
+                                            <span key={p} className="badge badge-accent" style={{ fontSize: 9, textTransform: 'capitalize' }}>{p}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Team members list */}
+                    <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        <Users size={18} /> Team Members ({teamMembers.length})
+                    </h3>
+                    {teamMembers.length === 0 ? (
+                        <div className="card" style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--text-tertiary)' }}>
+                            <Users size={32} style={{ margin: '0 auto var(--space-3)', opacity: 0.3 }} />
+                            <p>No team members yet. Assign roles above.</p>
+                        </div>
+                    ) : (
+                        <div className="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Member</th>
+                                        <th>Email</th>
+                                        <th>Role</th>
+                                        <th>Access</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {teamMembers.map(m => (
+                                        <tr key={m.id}>
+                                            <td style={{ fontWeight: 500 }}>
+                                                {m.first_name || ''} {m.last_name || ''}
+                                                {m.id === profile?.id && (
+                                                    <span className="badge badge-accent" style={{ marginLeft: 'var(--space-2)', fontSize: 9 }}>You</span>
+                                                )}
+                                            </td>
+                                            <td className="text-sm text-secondary">{m.email}</td>
+                                            <td>
+                                                <span className="badge" style={{
+                                                    background: m.admin_role === 'super_admin' ? 'rgba(245,158,11,0.15)' : 'rgba(37,99,235,0.15)',
+                                                    color: m.admin_role === 'super_admin' ? 'var(--color-warning-light)' : 'var(--brand-accent-light)',
+                                                }}>
+                                                    {m.admin_role === 'super_admin' && <Crown size={10} style={{ display: 'inline', marginRight: 2 }} />}
+                                                    {ADMIN_ROLE_LABELS[m.admin_role]}
+                                                </span>
+                                            </td>
+                                            <td className="text-xs text-secondary">
+                                                {ROLE_PERMISSIONS[m.admin_role]?.join(', ')}
+                                            </td>
+                                            <td>
+                                                {m.id !== profile?.id && (
+                                                    <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                                                        <select
+                                                            className="select"
+                                                            value={m.admin_role}
+                                                            style={{ padding: '4px 8px', fontSize: 'var(--fs-xs)', minWidth: 120 }}
+                                                            onChange={async (e) => {
+                                                                const newRole = e.target.value as AdminRole;
+                                                                const { error } = await adminSetUserRole(m.id, newRole);
+                                                                if (error) { addToast(error.message, 'error'); }
+                                                                else {
+                                                                    addToast(`Role updated to ${ADMIN_ROLE_LABELS[newRole]}`, 'success');
+                                                                    setTeamMembers(await adminGetTeamMembers());
+                                                                }
+                                                            }}
+                                                        >
+                                                            {(Object.keys(ADMIN_ROLE_LABELS) as AdminRole[]).map(r => (
+                                                                <option key={r} value={r}>{ADMIN_ROLE_LABELS[r]}</option>
+                                                            ))}
+                                                        </select>
+                                                        <button
+                                                            className="btn btn-ghost btn-sm"
+                                                            style={{ color: 'var(--color-danger)' }}
+                                                            onClick={async () => {
+                                                                if (!confirm(`Remove admin access for ${m.email}?`)) return;
+                                                                const { error } = await adminRemoveUserRole(m.id);
+                                                                if (error) { addToast(error.message, 'error'); }
+                                                                else {
+                                                                    addToast('Admin access removed', 'info');
+                                                                    setTeamMembers(await adminGetTeamMembers());
+                                                                }
+                                                            }}
+                                                        >
+                                                            <XCircle size={14} /> Remove
+                                                        </button>
+                                                    </div>
+                                                )}
+                                                {m.id === profile?.id && (
+                                                    <span className="text-xs text-secondary">Cannot modify own role</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            )}
+            {/* ===== MODULE EDIT MODAL ===== */}
+            {editingModule && (
+                <div className="modal-overlay" onClick={() => setEditingModule(null)}>
+                    <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-5)' }}>
+                            <h2 style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>{editingModule.id ? 'Edit Module' : 'New Module'}</h2>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setEditingModule(null)}><X size={16} /></button>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                            <div className="input-group">
+                                <label>Name</label>
+                                <input className="input" value={editingModule.name || ''} onChange={e => setEditingModule({ ...editingModule, name: e.target.value })} placeholder="e.g. The Cell" />
+                            </div>
+                            <div className="input-group">
+                                <label>ID (slug)</label>
+                                <input className="input" value={editingModule.id || ''} onChange={e => setEditingModule({ ...editingModule, id: e.target.value })} placeholder="Leave empty to auto-generate" />
+                            </div>
+                            <div className="input-group">
+                                <label>Sort Order</label>
+                                <input className="input" type="number" value={editingModule.sort_order || 0} onChange={e => setEditingModule({ ...editingModule, sort_order: parseInt(e.target.value) || 0 })} />
+                            </div>
+                        </div>
+                        <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-5)' }} onClick={handleSaveModule} disabled={savingModule || !editingModule.name}>
+                            {savingModule ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : <><Save size={16} /> Save Module</>}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ===== TOPIC EDIT MODAL ===== */}
+            {editingTopic && (
+                <div className="modal-overlay" onClick={() => setEditingTopic(null)}>
+                    <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 450 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-5)' }}>
+                            <h2 style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>{editingTopic.id ? 'Edit Topic' : 'New Topic'}</h2>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setEditingTopic(null)}><X size={16} /></button>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                            <div className="input-group">
+                                <label>Name</label>
+                                <input className="input" value={editingTopic.name || ''} onChange={e => setEditingTopic({ ...editingTopic, name: e.target.value })} placeholder="e.g. Mitochondria" />
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+                                <div className="input-group">
+                                    <label>ID (slug)</label>
+                                    <input className="input" value={editingTopic.id || ''} onChange={e => setEditingTopic({ ...editingTopic, id: e.target.value })} placeholder="Auto-generates" />
+                                </div>
+                                <div className="input-group">
+                                    <label>Sort Order</label>
+                                    <input className="input" type="number" value={editingTopic.sort_order || 0} onChange={e => setEditingTopic({ ...editingTopic, sort_order: parseInt(e.target.value) || 0 })} />
+                                </div>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+                                <div className="input-group">
+                                    <label>Lesson Type</label>
+                                    <select className="select" value={editingTopic.lesson_type || 'video'} onChange={e => setEditingTopic({ ...editingTopic, lesson_type: e.target.value as 'video'|'pdf'|'quiz' })}>
+                                        <option value="video">Video</option>
+                                        <option value="pdf">PDF</option>
+                                        <option value="quiz">Quiz</option>
+                                    </select>
+                                </div>
+                                <div className="input-group">
+                                    <label>Question Count</label>
+                                    <input className="input" type="number" value={editingTopic.question_count || 0} onChange={e => setEditingTopic({ ...editingTopic, question_count: parseInt(e.target.value) || 0 })} disabled={editingTopic.lesson_type !== 'quiz'} />
+                                </div>
+                            </div>
+                        </div>
+                        <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-5)' }} onClick={handleSaveTopic} disabled={savingTopic || !editingTopic.name}>
+                            {savingTopic ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : <><Save size={16} /> Save Topic</>}
+                        </button>
+                    </div>
                 </div>
             )}
         </AppLayout>

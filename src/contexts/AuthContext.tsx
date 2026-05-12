@@ -22,6 +22,7 @@ export interface Profile {
     daily_study_hours: number;
     focus_subjects: string[];
     is_admin: boolean;
+    admin_role: 'super_admin' | 'content_manager' | 'finance_manager' | 'analyst' | 'support' | null;
     created_at: string;
     updated_at: string;
 }

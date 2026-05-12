@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
     TrendingUp, Flame, BookOpen, Target, ArrowRight, Play,
     Clock, FileText, Zap, Award, Loader2
@@ -13,11 +14,16 @@ import './dashboard.css';
 
 export default function DashboardPage() {
     const { profile, user, loading } = useAuth();
+    const router = useRouter();
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [lastTest, setLastTest] = useState<TestResultRow | null>(null);
     const [dataLoading, setDataLoading] = useState(true);
 
     useEffect(() => {
+        if (!loading && !user) {
+            router.push('/login');
+            return;
+        }
         async function load() {
             if (user) {
                 const [coursesData, testsData] = await Promise.all([
@@ -32,7 +38,7 @@ export default function DashboardPage() {
         if (!loading) load();
     }, [user, loading]);
 
-    if (loading || !profile || dataLoading) {
+    if (loading || dataLoading) {
         return (
             <AppLayout>
                 <div className="page-wrapper" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
@@ -42,7 +48,7 @@ export default function DashboardPage() {
         );
     }
 
-    const displayName = profile.first_name || 'Student';
+    const displayName = profile?.first_name || 'Student';
     const totalTopics = courses.reduce((acc, c) => acc + c.modules.reduce((a, m) => a + m.topics.length, 0), 0);
     const completedTopics = courses.reduce((acc, c) => acc + c.modules.reduce((a, m) => a + m.topics.filter(t => t.completed).length, 0), 0);
     const completionPercent = totalTopics > 0 ? Math.round((completedTopics / totalTopics) * 100) : 0;
@@ -62,14 +68,14 @@ export default function DashboardPage() {
                         <div className="stat-icon" style={{ background: 'rgba(37, 99, 235, 0.15)', color: 'var(--brand-accent-light)' }}>
                             <Target size={20} />
                         </div>
-                        <div className="stat-value">{profile.estimated_score}</div>
+                        <div className="stat-value">{profile?.estimated_score || 0}</div>
                         <div className="stat-label">Estimated IMAT Score</div>
                     </div>
                     <div className="stat-card">
                         <div className="stat-icon" style={{ background: 'rgba(239, 68, 68, 0.15)', color: 'var(--color-danger-light)' }}>
                             <Flame size={20} />
                         </div>
-                        <div className="stat-value">{profile.study_streak} days</div>
+                        <div className="stat-value">{profile?.study_streak || 0} days</div>
                         <div className="stat-label">Study Streak 🔥</div>
                     </div>
                     <div className="stat-card">
@@ -83,7 +89,7 @@ export default function DashboardPage() {
                         <div className="stat-icon" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' }}>
                             <Clock size={20} />
                         </div>
-                        <div className="stat-value">{profile.total_study_hours}h</div>
+                        <div className="stat-value">{profile?.total_study_hours || 0}h</div>
                         <div className="stat-label">Total Study Hours</div>
                     </div>
                 </div>
@@ -178,7 +184,7 @@ export default function DashboardPage() {
                         <h2><Zap size={20} /> Practice Modes</h2>
                         <Link href="/create-test" className="btn btn-ghost btn-sm">View All <ArrowRight size={14} /></Link>
                     </div>
-                    <div className="grid grid-4">
+                    <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 'var(--space-4)' }}>
                         <Link href="/create-test" className="practice-card" style={{ '--practice-color': '#2563EB' } as React.CSSProperties}>
                             <div className="practice-icon">📝</div>
                             <h3>Custom Test</h3>
@@ -208,7 +214,7 @@ export default function DashboardPage() {
                         <h2><TrendingUp size={20} /> Your Courses</h2>
                         <Link href="/courses" className="btn btn-ghost btn-sm">See All <ArrowRight size={14} /></Link>
                     </div>
-                    <div className="grid grid-4">
+                    <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 'var(--space-4)' }}>
                         {courses.slice(0, 4).map(course => (
                             <Link href={`/courses/${course.id}`} key={course.id} className="course-mini-card">
                                 <div className="course-mini-icon">{course.icon}</div>
@@ -234,8 +240,8 @@ export default function DashboardPage() {
                         <span className="text-sm text-secondary">
                             {[
                                 !!lastTest,
-                                profile.study_streak >= 3,
-                                profile.study_streak >= 7,
+                                profile?.study_streak && profile.study_streak >= 3,
+                                profile?.study_streak && profile.study_streak >= 7,
                                 completedTopics >= 5,
                                 completedTopics >= 20,
                                 lastTest && lastTest.mode === 'timed',
@@ -249,8 +255,8 @@ export default function DashboardPage() {
                     <div className="milestones-row">
                         {[
                             { icon: '🎯', label: 'First Test', unlocked: !!lastTest, tooltip: 'Complete your first test' },
-                            { icon: '🔥', label: '3-Day Streak', unlocked: profile.study_streak >= 3, tooltip: 'Study for 3 days in a row' },
-                            { icon: '🔥', label: '7-Day Streak', unlocked: profile.study_streak >= 7, tooltip: 'Study for 7 days straight' },
+                            { icon: '🔥', label: '3-Day Streak', unlocked: !!(profile?.study_streak && profile.study_streak >= 3), tooltip: 'Study for 3 days in a row' },
+                            { icon: '🔥', label: '7-Day Streak', unlocked: !!(profile?.study_streak && profile.study_streak >= 7), tooltip: 'Study for 7 days straight' },
                             { icon: '📚', label: '5 Topics', unlocked: completedTopics >= 5, tooltip: 'Complete 5 topics' },
                             { icon: '📖', label: '20 Topics', unlocked: completedTopics >= 20, tooltip: 'Complete 20 topics' },
                             { icon: '⏱️', label: 'Simulation', unlocked: !!(lastTest && lastTest.mode === 'timed'), tooltip: 'Complete a timed exam simulation' },

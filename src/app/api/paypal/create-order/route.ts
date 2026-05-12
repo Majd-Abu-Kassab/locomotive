@@ -24,7 +24,7 @@ async function getAccessToken(): Promise<string> {
 // Body: { sectionId, amount, currency, description }
 export async function POST(req: NextRequest) {
     try {
-        const { amount, currency = 'EUR', description } = await req.json();
+        const { amount, currency = 'EUR', description, sectionId } = await req.json();
 
         if (!amount || amount <= 0) {
             return NextResponse.json({ error: 'Invalid amount' }, { status: 400 });
@@ -48,8 +48,6 @@ export async function POST(req: NextRequest) {
                     description: description || 'LOCOMOTIVE Course Access',
                 }],
                 application_context: {
-                    return_url: `${process.env.NEXT_PUBLIC_APP_URL}/upgrade?status=success`,
-                    cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/upgrade?status=cancelled`,
                     brand_name: 'LOCOMOTIVE',
                     user_action: 'PAY_NOW',
                 },

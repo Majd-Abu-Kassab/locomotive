@@ -63,7 +63,7 @@ export default function CreateTestPage() {
 
     return (
         <AppLayout>
-            <div className="page-wrapper" style={{ maxWidth: '900px' }}>
+            <div className="page-wrapper">
                 <div className="page-header">
                     <h1>Create Test</h1>
                     <p>Build a custom exam tailored to your study needs</p>

@@ -24,6 +24,7 @@ import {
     ChevronRight,
     GraduationCap,
     Settings,
+    Receipt,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import './Sidebar.css';
@@ -62,6 +63,7 @@ const navItems = [
         items: [
             { name: 'FAQs', href: '/faq', icon: HelpCircle },
             { name: 'Contact Support', href: '/contact', icon: MessageSquare },
+            { name: 'Order History', href: '/order-history', icon: Receipt },
             { name: 'Upgrade Plan', href: '/upgrade', icon: Crown },
         ],
     },
@@ -126,7 +128,7 @@ export default function Sidebar() {
                     </div>
                 ))}
 
-                {profile?.is_admin && (
+                {!!profile?.admin_role && (
                     <div className="nav-section">
                         {!collapsed && <span className="nav-category">{adminItems.category}</span>}
                         <ul className="nav-list">

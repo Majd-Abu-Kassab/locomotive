@@ -1,18 +1,127 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
-import { Check, Crown, Zap, Star, Tag, Loader2, Lock, Unlock, CreditCard, CheckCircle } from 'lucide-react';
+import {
+    Check, Crown, Zap, Star, Tag, Loader2, Lock, Unlock,
+    CreditCard, CheckCircle, ShieldCheck,
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
-import { getCourses, getCourseSections, validateCoupon, createPaymentRecord, CourseWithModules, CourseSection } from '@/lib/api';
+import {
+    getCourses, getCourseSections, validateCoupon, createPaymentRecord,
+    CourseWithModules, CourseSection,
+} from '@/lib/api';
+import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import './upgrade.css';
 
+/* ─── PayPal wrapper ─── */
+function PayPalCheckoutButtons({
+    finalPrice,
+    currency,
+    description,
+    sectionId,
+    userId,
+    couponId,
+    discount,
+    onSuccess,
+    onError,
+}: {
+    finalPrice: number;
+    currency: string;
+    description: string;
+    sectionId: string;
+    userId: string;
+    couponId: string | null;
+    discount: number;
+    onSuccess: () => void;
+    onError: (msg: string) => void;
+}) {
+    return (
+        <PayPalScriptProvider
+            options={{
+                clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '',
+                currency: currency,
+                intent: 'capture',
+            }}
+        >
+            <div className="paypal-buttons-wrapper">
+                <PayPalButtons
+                    style={{
+                        layout: 'vertical',
+                        color: 'blue',
+                        shape: 'rect',
+                        label: 'pay',
+                        height: 48,
+                    }}
+                    fundingSource={undefined}
+                    createOrder={async () => {
+                        const res = await fetch('/api/paypal/create-order', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                amount: finalPrice,
+                                currency,
+                                description,
+                                sectionId,
+                            }),
+                        });
+                        const data = await res.json();
+                        if (!data.orderId) {
+                            onError('Failed to create PayPal order. Please try again.');
+                            throw new Error('No orderId');
+                        }
+
+                        // Create pending payment record
+                        await createPaymentRecord({
+                            user_id: userId,
+                            section_id: sectionId,
+                            amount: finalPrice,
+                            currency,
+                            paypal_order_id: data.orderId,
+                            coupon_id: couponId,
+                            discount_amount: discount,
+                        });
+
+                        return data.orderId;
+                    }}
+                    onApprove={async (data) => {
+                        try {
+                            const captureRes = await fetch('/api/paypal/capture-order', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    orderId: data.orderID,
+                                    userId,
+                                    sectionId,
+                                }),
+                            });
+                            const captureData = await captureRes.json();
+                            if (captureData.success) {
+                                onSuccess();
+                            } else {
+                                onError('Payment received but access grant failed. Contact support.');
+                            }
+                        } catch {
+                            onError('Payment processing error. Contact support.');
+                        }
+                    }}
+                    onError={() => {
+                        onError('PayPal encountered an error. Please try again.');
+                    }}
+                    onCancel={() => {
+                        onError('Payment cancelled.');
+                    }}
+                />
+            </div>
+        </PayPalScriptProvider>
+    );
+}
+
+/* ─── Main Page ─── */
 function UpgradeContent() {
     const { user } = useAuth();
     const { addToast } = useToast();
-    const searchParams = useSearchParams();
 
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [selectedCourseId, setSelectedCourseId] = useState('');
@@ -24,16 +133,8 @@ function UpgradeContent() {
     const [couponId, setCouponId] = useState<string | null>(null);
     const [couponMsg, setCouponMsg] = useState('');
     const [couponValid, setCouponValid] = useState<boolean | null>(null);
-    const [paypalLoading, setPaypalLoading] = useState(false);
     const [loading, setLoading] = useState(true);
-
-    // Handle post-payment redirect
-    const status = searchParams.get('status');
-
-    useEffect(() => {
-        if (status === 'success') addToast('Payment successful! Access granted.', 'success');
-        if (status === 'cancelled') addToast('Payment cancelled.', 'info');
-    }, [status, addToast]);
+    const [paymentSuccess, setPaymentSuccess] = useState(false);
 
     useEffect(() => {
         getCourses(user?.id).then(c => { setCourses(c); setLoading(false); });
@@ -67,50 +168,13 @@ function UpgradeContent() {
         setCouponLoading(false);
     };
 
-    const handlePayWithPayPal = async () => {
-        if (!selectedSection || !user) {
-            addToast('Please select a section and ensure you are logged in.', 'error');
-            return;
-        }
+    const handlePaymentSuccess = () => {
+        setPaymentSuccess(true);
+        addToast('Payment successful! Section access granted. 🎉', 'success');
+    };
 
-        setPaypalLoading(true);
-        try {
-            // 1. Create PayPal order
-            const orderRes = await fetch('/api/paypal/create-order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    amount: finalPrice,
-                    currency: selectedSection.currency || 'EUR',
-                    description: `${courses.find(c => c.id === selectedCourseId)?.name} — ${selectedSection.name}`,
-                }),
-            });
-            const orderData = await orderRes.json();
-
-            if (!orderData.orderId) {
-                addToast('Failed to create PayPal order. Please try again.', 'error');
-                setPaypalLoading(false);
-                return;
-            }
-
-            // 2. Create pending payment record in our DB
-            await createPaymentRecord({
-                user_id: user.id,
-                section_id: selectedSection.id,
-                amount: finalPrice,
-                currency: selectedSection.currency || 'EUR',
-                paypal_order_id: orderData.orderId,
-                coupon_id: couponId,
-                discount_amount: discount,
-            });
-
-            // 3. Redirect to PayPal
-            window.location.href = orderData.approvalUrl;
-        } catch (err) {
-            console.error(err);
-            addToast('Something went wrong. Please try again.', 'error');
-            setPaypalLoading(false);
-        }
+    const handlePaymentError = (msg: string) => {
+        addToast(msg, 'error');
     };
 
     if (loading) {
@@ -118,6 +182,39 @@ function UpgradeContent() {
             <AppLayout>
                 <div className="page-wrapper" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
                     <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--text-tertiary)' }} />
+                </div>
+            </AppLayout>
+        );
+    }
+
+    // Success state
+    if (paymentSuccess) {
+        return (
+            <AppLayout>
+                <div className="page-wrapper" style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center', paddingTop: 'var(--space-16)' }}>
+                    <div style={{
+                        width: 80, height: 80, borderRadius: '50%',
+                        background: 'rgba(16,185,129,0.15)', color: 'var(--color-success)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        margin: '0 auto var(--space-5)',
+                        animation: 'scaleIn 0.4s ease-out',
+                    }}>
+                        <CheckCircle size={40} />
+                    </div>
+                    <h1 style={{ fontSize: 'var(--fs-3xl)', fontWeight: 700, marginBottom: 'var(--space-3)' }}>
+                        Payment Successful! 🎉
+                    </h1>
+                    <p className="text-secondary" style={{ marginBottom: 'var(--space-6)', fontSize: 'var(--fs-md)' }}>
+                        Your section has been unlocked. You can now access all the lessons and materials.
+                    </p>
+                    <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'center' }}>
+                        <a href={`/courses/${selectedCourseId}`} className="btn btn-primary">
+                            Go to Course
+                        </a>
+                        <button className="btn btn-secondary" onClick={() => { setPaymentSuccess(false); setSelectedSection(null); }}>
+                            Buy Another Section
+                        </button>
+                    </div>
                 </div>
             </AppLayout>
         );
@@ -131,33 +228,33 @@ function UpgradeContent() {
                     <p>Pay per section and retain access to everything you&apos;ve paid for until the exam date</p>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: 'var(--space-8)', alignItems: 'start' }}>
+                <div className="checkout-grid">
 
-                    {/* Left: Course + Section selector */}
-                    <div>
+                    {/* ═══ Left Column ═══ */}
+                    <div className="checkout-main">
+
                         {/* Step 1: Choose course */}
-                        <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
-                            <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                                <span style={{ background: 'var(--brand-accent)', color: 'white', borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--fs-xs)', fontWeight: 700, flexShrink: 0 }}>1</span>
+                        <div className="card checkout-step">
+                            <h3 className="checkout-step-title">
+                                <span className="step-number">1</span>
                                 Choose a Course
                             </h3>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-3)' }}>
+                            <div className="course-grid">
                                 {courses.map(course => (
                                     <button
                                         key={course.id}
                                         onClick={() => setSelectedCourseId(course.id)}
+                                        className={`course-card ${selectedCourseId === course.id ? 'selected' : ''}`}
                                         style={{
-                                            padding: 'var(--space-3)',
-                                            border: `2px solid ${selectedCourseId === course.id ? course.color : 'var(--border-primary)'}`,
-                                            borderRadius: 'var(--radius-md)',
-                                            background: selectedCourseId === course.id ? `${course.color}11` : 'var(--bg-glass)',
-                                            cursor: 'pointer',
-                                            textAlign: 'left',
-                                            transition: 'all var(--transition-base)',
+                                            borderColor: selectedCourseId === course.id ? course.color : undefined,
+                                            background: selectedCourseId === course.id ? `${course.color}11` : undefined,
                                         }}
                                     >
                                         <div style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>{course.icon}</div>
-                                        <div style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', color: selectedCourseId === course.id ? course.color : 'var(--text-primary)' }}>{course.name}</div>
+                                        <div style={{
+                                            fontWeight: 600, fontSize: 'var(--fs-sm)',
+                                            color: selectedCourseId === course.id ? course.color : 'var(--text-primary)',
+                                        }}>{course.name}</div>
                                     </button>
                                 ))}
                             </div>
@@ -165,33 +262,30 @@ function UpgradeContent() {
 
                         {/* Step 2: Choose section */}
                         {selectedCourseId && (
-                            <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
-                                <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                                    <span style={{ background: 'var(--brand-accent)', color: 'white', borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--fs-xs)', fontWeight: 700, flexShrink: 0 }}>2</span>
+                            <div className="card checkout-step">
+                                <h3 className="checkout-step-title">
+                                    <span className="step-number">2</span>
                                     Choose a Section / Installment
                                 </h3>
                                 {sections.length === 0 ? (
                                     <p className="text-secondary text-sm">No sections configured for this course yet. Contact support.</p>
                                 ) : (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                                    <div className="section-list">
                                         {sections.map(section => (
                                             <button
                                                 key={section.id}
-                                                onClick={() => { if (!section.unlocked) { setSelectedSection(section); setDiscount(0); setCouponCode(''); setCouponValid(null); setCouponMsg(''); } }}
-                                                style={{
-                                                    display: 'flex', alignItems: 'center', gap: 'var(--space-4)',
-                                                    padding: 'var(--space-4)',
-                                                    border: `2px solid ${selectedSection?.id === section.id ? 'var(--brand-accent)' : section.unlocked ? 'var(--color-success)' : 'var(--border-primary)'}`,
-                                                    borderRadius: 'var(--radius-md)',
-                                                    background: section.unlocked ? 'rgba(16,185,129,0.05)' : selectedSection?.id === section.id ? 'rgba(37,99,235,0.07)' : 'var(--bg-glass)',
-                                                    cursor: section.unlocked ? 'default' : 'pointer',
-                                                    textAlign: 'left', width: '100%',
-                                                    transition: 'all var(--transition-base)',
+                                                onClick={() => {
+                                                    if (!section.unlocked) {
+                                                        setSelectedSection(section);
+                                                        setDiscount(0);
+                                                        setCouponCode('');
+                                                        setCouponValid(null);
+                                                        setCouponMsg('');
+                                                    }
                                                 }}
+                                                className={`section-card ${selectedSection?.id === section.id ? 'selected' : ''} ${section.unlocked ? 'unlocked' : ''}`}
                                             >
-                                                <div style={{
-                                                    width: 40, height: 40, borderRadius: 'var(--radius-md)', flexShrink: 0,
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                <div className="section-icon-wrap" style={{
                                                     background: section.unlocked ? 'rgba(16,185,129,0.15)' : 'rgba(37,99,235,0.1)',
                                                     color: section.unlocked ? 'var(--color-success)' : 'var(--brand-accent-light)',
                                                 }}>
@@ -205,7 +299,11 @@ function UpgradeContent() {
                                                         {section.unlocked ? '✅ Access granted until exam date' : `${(section.moduleIds || []).length} modules included`}
                                                     </div>
                                                 </div>
-                                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-lg)', color: section.unlocked ? 'var(--color-success)' : 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                                                <div style={{
+                                                    fontWeight: 700, fontSize: 'var(--fs-lg)',
+                                                    color: section.unlocked ? 'var(--color-success)' : 'var(--text-primary)',
+                                                    whiteSpace: 'nowrap',
+                                                }}>
                                                     {section.unlocked ? <CheckCircle size={20} /> : `€${Number(section.price).toFixed(2)}`}
                                                 </div>
                                             </button>
@@ -215,8 +313,43 @@ function UpgradeContent() {
                             </div>
                         )}
 
-                        {/* What&apos;s included */}
-                        <div className="card">
+                        {/* Step 3: Payment */}
+                        {selectedSection && (
+                            <div className="card checkout-step">
+                                <h3 className="checkout-step-title">
+                                    <span className="step-number">3</span>
+                                    Payment
+                                </h3>
+
+                                <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
+                                    Choose your preferred payment method. Both PayPal and Credit/Debit card are accepted.
+                                </p>
+
+                                {/* PayPal Buttons */}
+                                {user && (
+                                    <PayPalCheckoutButtons
+                                        finalPrice={finalPrice}
+                                        currency={selectedSection.currency || 'EUR'}
+                                        description={`${courses.find(c => c.id === selectedCourseId)?.name} — ${selectedSection.name}`}
+                                        sectionId={selectedSection.id}
+                                        userId={user.id}
+                                        couponId={couponId}
+                                        discount={discount}
+                                        onSuccess={handlePaymentSuccess}
+                                        onError={handlePaymentError}
+                                    />
+                                )}
+
+                                {/* Security note */}
+                                <div className="security-note">
+                                    <ShieldCheck size={16} />
+                                    <span>Secured by PayPal. Card details are never stored on our servers.</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* What's included */}
+                        <div className="card checkout-step">
                             <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)' }}>What&apos;s included in every section</h3>
                             {[
                                 'Access to all lessons in the section (videos, PDFs, quizzes)',
@@ -233,52 +366,54 @@ function UpgradeContent() {
                         </div>
                     </div>
 
-                    {/* Right: Checkout panel */}
-                    <div style={{ position: 'sticky', top: 'var(--space-6)' }}>
-                        <div className="card">
-                            <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-5)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                                <CreditCard size={18} /> Checkout
+                    {/* ═══ Right Column: Order Summary ═══ */}
+                    <div className="checkout-sidebar">
+                        <div className="card checkout-summary">
+                            <h3 className="summary-title">
+                                <CreditCard size={18} /> Order Summary
                             </h3>
 
                             {!selectedSection ? (
-                                <div style={{ textAlign: 'center', padding: 'var(--space-8) 0', color: 'var(--text-tertiary)' }}>
-                                    <Crown size={32} style={{ margin: '0 auto var(--space-3)', opacity: 0.3 }} />
+                                <div className="summary-empty">
+                                    <Crown size={32} style={{ opacity: 0.3, marginBottom: 'var(--space-3)' }} />
                                     <p className="text-sm">Select a course and section to continue</p>
                                 </div>
                             ) : (
                                 <>
-                                    {/* Order summary */}
-                                    <div style={{ background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', padding: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+                                    {/* Line items */}
+                                    <div className="summary-items">
+                                        <div className="summary-row">
                                             <span className="text-sm text-secondary">Course</span>
                                             <span className="text-sm font-semibold">{courses.find(c => c.id === selectedCourseId)?.name}</span>
                                         </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+                                        <div className="summary-row">
                                             <span className="text-sm text-secondary">Section</span>
                                             <span className="text-sm font-semibold">{selectedSection.name}</span>
                                         </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: discount > 0 ? 'var(--space-2)' : 0 }}>
+                                        <div className="summary-row">
                                             <span className="text-sm text-secondary">Price</span>
                                             <span className="text-sm font-semibold">€{Number(selectedSection.price).toFixed(2)}</span>
                                         </div>
                                         {discount > 0 && (
-                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <div className="summary-row">
                                                 <span className="text-sm" style={{ color: 'var(--color-success)' }}>Discount</span>
                                                 <span className="text-sm font-semibold" style={{ color: 'var(--color-success)' }}>−€{discount.toFixed(2)}</span>
                                             </div>
                                         )}
-                                        <div style={{ borderTop: '1px solid var(--border-primary)', marginTop: 'var(--space-3)', paddingTop: 'var(--space-3)', display: 'flex', justifyContent: 'space-between' }}>
-                                            <span style={{ fontWeight: 700 }}>Total</span>
-                                            <span style={{ fontWeight: 700, fontSize: 'var(--fs-xl)', color: 'var(--brand-accent-light)' }}>€{finalPrice.toFixed(2)}</span>
-                                        </div>
+                                    </div>
+
+                                    {/* Total */}
+                                    <div className="summary-total">
+                                        <span style={{ fontWeight: 700 }}>Total</span>
+                                        <span className="summary-total-price">€{finalPrice.toFixed(2)}</span>
                                     </div>
 
                                     {/* Coupon */}
-                                    <div style={{ marginBottom: 'var(--space-5)' }}>
-                                        <label style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                                    <div className="coupon-section">
+                                        <label className="coupon-label">
                                             <Tag size={14} /> Coupon Code
                                         </label>
-                                        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                                        <div className="coupon-input-row">
                                             <input
                                                 className="input"
                                                 value={couponCode}
@@ -292,33 +427,16 @@ function UpgradeContent() {
                                             </button>
                                         </div>
                                         {couponMsg && (
-                                            <p style={{ fontSize: 'var(--fs-xs)', marginTop: 'var(--space-1)', color: couponValid ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                                            <p className="coupon-msg" style={{ color: couponValid ? 'var(--color-success)' : 'var(--color-danger)' }}>
                                                 {couponMsg}
                                             </p>
                                         )}
                                     </div>
 
-                                    {/* PayPal button */}
-                                    <button
-                                        className="btn btn-primary btn-lg"
-                                        style={{ width: '100%', marginBottom: 'var(--space-3)' }}
-                                        onClick={handlePayWithPayPal}
-                                        disabled={paypalLoading || !user}
-                                    >
-                                        {paypalLoading ? (
-                                            <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Processing...</>
-                                        ) : (
-                                            <><Star size={16} /> Pay €{finalPrice.toFixed(2)} with PayPal</>
-                                        )}
-                                    </button>
-                                    <p className="text-xs text-secondary" style={{ textAlign: 'center' }}>
-                                        🔒 Secured by PayPal. No card stored on our servers.
-                                    </p>
-
                                     {/* Trust badges */}
-                                    <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-4)', marginTop: 'var(--space-4)', flexWrap: 'wrap' }}>
+                                    <div className="trust-badges">
                                         {['Access until exam date', 'Keep paid sections forever', 'Instant unlock'].map((t, i) => (
-                                            <span key={i} style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            <span key={i} className="trust-badge">
                                                 <Zap size={10} style={{ color: 'var(--color-warning)' }} /> {t}
                                             </span>
                                         ))}

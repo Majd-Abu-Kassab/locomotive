@@ -5,10 +5,12 @@ import AppLayout from '@/components/AppLayout';
 import Link from 'next/link';
 import {
     ArrowLeft, ArrowRight, Play, FileText, CheckCircle2, Circle,
-    Loader2, Video, HelpCircle, BookOpen, ChevronRight
+    Loader2, Video, HelpCircle, BookOpen, ChevronRight, Download, Clock
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCourse, getQuestions, markTopicComplete, markTopicIncomplete, CourseWithModules, TopicWithProgress, QuestionRow } from '@/lib/api';
+import { RichTextPreview } from '@/components/RichTextEditor';
+import 'katex/dist/katex.min.css';
 
 export default function LessonPage({ params }: { params: Promise<{ courseId: string; lessonId: string }> }) {
     const { courseId, lessonId } = use(params);
@@ -23,9 +25,10 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
     const [quizLoading, setQuizLoading] = useState(false);
     const [currentQuizQ, setCurrentQuizQ] = useState(0);
     const [quizAnswer, setQuizAnswer] = useState<number | null>(null);
-    const [quizRevealed, setQuizRevealed] = useState(false);
     const [quizScore, setQuizScore] = useState({ correct: 0, total: 0 });
     const [quizFinished, setQuizFinished] = useState(false);
+    const [quizTimer, setQuizTimer] = useState(100);
+    const [quizAnswers, setQuizAnswers] = useState<Record<number, number | null>>({});
 
     useEffect(() => {
         async function load() {
@@ -75,9 +78,10 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
         setQuizQuestions(questions);
         setCurrentQuizQ(0);
         setQuizAnswer(null);
-        setQuizRevealed(false);
         setQuizScore({ correct: 0, total: 0 });
         setQuizFinished(false);
+        setQuizTimer(100);
+        setQuizAnswers({});
         setQuizLoading(false);
     };
 
@@ -95,29 +99,41 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
     };
 
     const handleQuizAnswer = (idx: number) => {
-        if (quizRevealed) return;
         setQuizAnswer(idx);
     };
 
-    const handleQuizReveal = () => {
-        if (quizAnswer === null) return;
-        setQuizRevealed(true);
-        const isCorrect = quizAnswer === quizQuestions[currentQuizQ].correct_answer;
-        setQuizScore(prev => ({
-            correct: prev.correct + (isCorrect ? 1 : 0),
-            total: prev.total + 1,
-        }));
-    };
-
-    const handleQuizNext = () => {
+    const handleQuizAdvance = () => {
+        // Save current answer
+        setQuizAnswers(prev => ({ ...prev, [currentQuizQ]: quizAnswer }));
         if (currentQuizQ >= quizQuestions.length - 1) {
+            // Calculate final score
+            const finalAnswers = { ...quizAnswers, [currentQuizQ]: quizAnswer };
+            let correct = 0;
+            quizQuestions.forEach((q, i) => {
+                if (finalAnswers[i] !== null && finalAnswers[i] !== undefined && finalAnswers[i] === q.correct_answer) correct++;
+            });
+            setQuizScore({ correct, total: quizQuestions.length });
             setQuizFinished(true);
             return;
         }
         setCurrentQuizQ(prev => prev + 1);
         setQuizAnswer(null);
-        setQuizRevealed(false);
+        setQuizTimer(100);
     };
+
+    // Quiz per-question countdown timer — auto-advance on expiry
+    useEffect(() => {
+        if (quizQuestions.length === 0 || quizFinished || quizLoading) return;
+        if (quizTimer <= 0) {
+            handleQuizAdvance();
+            return;
+        }
+        const interval = setInterval(() => {
+            setQuizTimer(prev => prev - 1);
+        }, 1000);
+        return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [quizTimer, quizFinished, quizLoading, quizQuestions.length]);
 
     if (loading) {
         return (
@@ -150,7 +166,7 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
 
     return (
         <AppLayout>
-            <div className="page-wrapper" style={{ maxWidth: '900px' }}>
+            <div className="page-wrapper">
                 {/* Breadcrumb */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--fs-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-4)' }}>
                     <Link href="/courses" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>Courses</Link>
@@ -234,27 +250,65 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                 {topic.lesson_type === 'pdf' && (
                     <div className="card" style={{
                         marginBottom: 'var(--space-6)',
-                        minHeight: '400px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: `linear-gradient(135deg, ${config.gradient})`,
+                        overflow: 'hidden',
                     }}>
-                        <div style={{ textAlign: 'center' }}>
+                        {topic.content_url ? (
+                            <>
+                                <div style={{
+                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                    padding: 'var(--space-3) var(--space-4)',
+                                    background: 'rgba(245,158,11,0.08)',
+                                    borderBottom: '1px solid var(--border-primary)',
+                                }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+                                        <FileText size={16} style={{ color: 'var(--color-warning)' }} />
+                                        {topic.content_type === 'presentation' ? 'Presentation' : 'PDF Study Material'}
+                                    </span>
+                                    <a href={topic.content_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm" download>
+                                        <Download size={14} /> Download
+                                    </a>
+                                </div>
+                                {topic.content_type === 'pdf' ? (
+                                    <iframe
+                                        src={topic.content_url}
+                                        style={{ width: '100%', height: '600px', border: 'none' }}
+                                        title={`${topic.name} - PDF`}
+                                    />
+                                ) : (
+                                    <div style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
+                                        <FileText size={48} style={{ color: 'var(--color-warning)', marginBottom: 'var(--space-3)' }} />
+                                        <p style={{ fontWeight: 600, marginBottom: 'var(--space-2)' }}>Presentation Available</p>
+                                        <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
+                                            Download to view in PowerPoint or Google Slides
+                                        </p>
+                                        <a href={topic.content_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+                                            <Download size={16} /> Download Presentation
+                                        </a>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
                             <div style={{
-                                width: '80px', height: '100px', borderRadius: 'var(--radius-md)',
-                                background: 'rgba(245,158,11,0.15)', border: '2px solid rgba(245,158,11,0.3)',
+                                minHeight: '400px',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                margin: '0 auto var(--space-4)',
+                                background: `linear-gradient(135deg, ${config.gradient})`,
                             }}>
-                                <FileText size={36} style={{ color: 'var(--color-warning)' }} />
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{
+                                        width: '80px', height: '100px', borderRadius: 'var(--radius-md)',
+                                        background: 'rgba(245,158,11,0.15)', border: '2px solid rgba(245,158,11,0.3)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        margin: '0 auto var(--space-4)',
+                                    }}>
+                                        <FileText size={36} style={{ color: 'var(--color-warning)' }} />
+                                    </div>
+                                    <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>PDF Study Material</p>
+                                    <p className="text-sm text-secondary">
+                                        Content coming soon — check back later
+                                    </p>
+                                </div>
                             </div>
-                            <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>PDF Study Material</p>
-                            <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
-                                Comprehensive notes for {topic.name}
-                            </p>
-                            <button className="btn btn-primary" style={{ gap: 'var(--space-2)' }}>
-                                <BookOpen size={16} /> Open PDF
-                            </button>
-                        </div>
+                        )}
                     </div>
                 )}
 
@@ -288,40 +342,166 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                             </div>
                         ) : quizFinished ? (
                             /* Quiz results */
-                            <div style={{ textAlign: 'center', padding: 'var(--space-8) var(--space-4)' }}>
-                                <h3 style={{ fontSize: 'var(--fs-xl)', fontWeight: 600, marginBottom: 'var(--space-4)' }}>
-                                    Quiz Complete! 🎉
-                                </h3>
-                                <div style={{
-                                    fontSize: 'var(--fs-4xl)', fontWeight: 800, marginBottom: 'var(--space-2)',
-                                    color: quizScore.correct / quizScore.total >= 0.7 ? 'var(--color-success)' : quizScore.correct / quizScore.total >= 0.4 ? 'var(--color-warning)' : 'var(--color-danger)',
-                                }}>
-                                    {quizScore.correct}/{quizScore.total}
+                            <div style={{ padding: 'var(--space-6) var(--space-4)' }}>
+                                <div style={{ textAlign: 'center', marginBottom: 'var(--space-6)' }}>
+                                    <h3 style={{ fontSize: 'var(--fs-xl)', fontWeight: 600, marginBottom: 'var(--space-4)' }}>
+                                        Quiz Complete! 🎉
+                                    </h3>
+                                    <div style={{
+                                        fontSize: 'var(--fs-4xl)', fontWeight: 800, marginBottom: 'var(--space-2)',
+                                        color: quizScore.correct / quizScore.total >= 0.7 ? 'var(--color-success)' : quizScore.correct / quizScore.total >= 0.4 ? 'var(--color-warning)' : 'var(--color-danger)',
+                                    }}>
+                                        {quizScore.correct}/{quizScore.total}
+                                    </div>
+                                    <p className="text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
+                                        {quizScore.correct === quizScore.total ? 'Perfect score! Outstanding!' :
+                                            quizScore.correct / quizScore.total >= 0.7 ? 'Great job! Keep it up!' :
+                                                'Keep practicing, you\'ll improve!'}
+                                    </p>
+                                    <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'center' }}>
+                                        <button className="btn btn-secondary" onClick={loadQuiz}>Try Again</button>
+                                        {!topicCompleted && (
+                                            <button className="btn btn-primary" onClick={handleToggleComplete}>
+                                                <CheckCircle2 size={16} /> Mark Complete
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
-                                <p className="text-secondary" style={{ marginBottom: 'var(--space-6)' }}>
-                                    {quizScore.correct === quizScore.total ? 'Perfect score! Outstanding!' :
-                                        quizScore.correct / quizScore.total >= 0.7 ? 'Great job! Keep it up!' :
-                                            'Keep practicing, you\'ll improve!'}
-                                </p>
-                                <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'center' }}>
-                                    <button className="btn btn-secondary" onClick={loadQuiz}>Try Again</button>
-                                    {!topicCompleted && (
-                                        <button className="btn btn-primary" onClick={handleToggleComplete}>
-                                            <CheckCircle2 size={16} /> Mark Complete
-                                        </button>
-                                    )}
+
+                                {/* Question Review */}
+                                <div style={{
+                                    borderTop: '1px solid var(--border-primary)',
+                                    paddingTop: 'var(--space-6)',
+                                }}>
+                                    <h4 style={{ fontSize: 'var(--fs-lg)', fontWeight: 600, marginBottom: 'var(--space-4)' }}>
+                                        📋 Review Answers
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                                        {quizQuestions.map((question, qIdx) => {
+                                            const userPick = quizAnswers[qIdx] ?? null;
+                                            const correctIdx = question.correct_answer;
+                                            const isCorrect = userPick !== null && userPick === correctIdx;
+                                            const wasUnanswered = userPick === null;
+
+                                            return (
+                                                <div key={qIdx} style={{
+                                                    padding: 'var(--space-4)',
+                                                    background: isCorrect ? 'rgba(16,185,129,0.06)' : 'rgba(239,68,68,0.06)',
+                                                    border: `1px solid ${isCorrect ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
+                                                    borderRadius: 'var(--radius-lg)',
+                                                }}>
+                                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+                                                        <span style={{
+                                                            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            fontSize: 'var(--fs-xs)', fontWeight: 700,
+                                                            background: isCorrect ? 'var(--color-success)' : 'var(--color-danger)',
+                                                            color: 'white', marginTop: 2,
+                                                        }}>
+                                                            {isCorrect ? '✓' : '✗'}
+                                                        </span>
+                                                        <div style={{ flex: 1 }}>
+                                                            <p style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                                                                Q{qIdx + 1}. <RichTextPreview text={question.stem} />
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', marginLeft: 'calc(28px + var(--space-3))' }}>
+                                                        {question.options.map((opt, oIdx) => {
+                                                            const optLabel = typeof opt === 'string' && opt.match(/^[A-E]\) /) ? opt.substring(3) : opt;
+                                                            const isThisCorrect = oIdx === correctIdx;
+                                                            const isThisUserPick = oIdx === userPick;
+                                                            let optBg = 'transparent';
+                                                            let optColor = 'var(--text-secondary)';
+                                                            let optWeight = 400;
+                                                            if (isThisCorrect) {
+                                                                optBg = 'rgba(16,185,129,0.12)';
+                                                                optColor = 'var(--color-success)';
+                                                                optWeight = 600;
+                                                            } else if (isThisUserPick && !isThisCorrect) {
+                                                                optBg = 'rgba(239,68,68,0.12)';
+                                                                optColor = 'var(--color-danger)';
+                                                                optWeight = 600;
+                                                            }
+                                                            return (
+                                                                <div key={oIdx} style={{
+                                                                    display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                                                                    padding: '4px 8px', borderRadius: 'var(--radius-sm)',
+                                                                    background: optBg,
+                                                                    fontSize: 'var(--fs-sm)', color: optColor, fontWeight: optWeight,
+                                                                }}>
+                                                                    <span style={{ width: 18, textAlign: 'center', fontWeight: 600 }}>
+                                                                        {String.fromCharCode(65 + oIdx)}
+                                                                    </span>
+                                                                    <span>{optLabel}</span>
+                                                                    {isThisCorrect && <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-xs)' }}>✓ Correct</span>}
+                                                                    {isThisUserPick && !isThisCorrect && <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-xs)' }}>✗ Your answer</span>}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                        {wasUnanswered && (
+                                                            <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-warning)', marginTop: 'var(--space-1)' }}>
+                                                                ⏱ Time expired — no answer selected
+                                                            </p>
+                                                        )}
+                                                        {question.explanation && (
+                                                            <div style={{
+                                                                marginTop: 'var(--space-2)', padding: 'var(--space-2) var(--space-3)',
+                                                                background: 'rgba(37,99,235,0.06)', borderRadius: 'var(--radius-sm)',
+                                                                fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)',
+                                                            }}>
+                                                                💡 <RichTextPreview text={question.explanation} />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             </div>
                         ) : (
                             /* Quiz question */
                             <div style={{ padding: 'var(--space-2)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-5)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
                                     <h3 style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>
                                         Question {currentQuizQ + 1} of {quizQuestions.length}
                                     </h3>
-                                    <span className="text-sm text-secondary">
-                                        Score: {quizScore.correct}/{quizScore.total}
-                                    </span>
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                                        padding: '4px 12px',
+                                        background: quizTimer <= 10 ? 'rgba(239,68,68,0.12)' : quizTimer <= 30 ? 'rgba(245,158,11,0.12)' : 'rgba(37,99,235,0.08)',
+                                        border: `1px solid ${quizTimer <= 10 ? 'rgba(239,68,68,0.3)' : quizTimer <= 30 ? 'rgba(245,158,11,0.3)' : 'rgba(37,99,235,0.2)'}`,
+                                        borderRadius: 'var(--radius-full)',
+                                        fontVariantNumeric: 'tabular-nums',
+                                        transition: 'all var(--transition-fast)',
+                                    }}>
+                                        <Clock size={14} style={{
+                                            color: quizTimer <= 10 ? 'var(--color-danger)' : quizTimer <= 30 ? 'var(--color-warning)' : 'var(--brand-accent-light)',
+                                            animation: quizTimer <= 10 ? 'pulse 1s infinite' : 'none',
+                                        }} />
+                                        <span style={{
+                                            fontSize: 'var(--fs-sm)', fontWeight: 700,
+                                            color: quizTimer <= 10 ? 'var(--color-danger)' : quizTimer <= 30 ? 'var(--color-warning)' : 'var(--text-primary)',
+                                        }}>
+                                            {quizTimer}s
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Timer progress bar */}
+                                <div style={{
+                                    width: '100%', height: '3px', borderRadius: '2px',
+                                    background: 'var(--border-primary)', marginBottom: 'var(--space-5)',
+                                    overflow: 'hidden',
+                                }}>
+                                    <div style={{
+                                        height: '100%',
+                                        width: `${(quizTimer / 100) * 100}%`,
+                                        borderRadius: '2px',
+                                        background: quizTimer <= 10 ? 'var(--color-danger)' : quizTimer <= 30 ? 'var(--color-warning)' : 'var(--brand-accent)',
+                                        transition: 'width 1s linear, background var(--transition-fast)',
+                                    }} />
                                 </div>
 
                                 {/* Progress dots */}
@@ -329,31 +509,21 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                                     {quizQuestions.map((_, i) => (
                                         <div key={i} style={{
                                             flex: 1, height: 4, borderRadius: 2,
-                                            background: i < currentQuizQ ? 'var(--color-success)' :
+                                            background: i < currentQuizQ ? 'var(--brand-accent-light)' :
                                                 i === currentQuizQ ? 'var(--brand-accent)' : 'var(--border-primary)',
                                             transition: 'background var(--transition-fast)',
                                         }} />
                                     ))}
                                 </div>
 
-                                <p style={{ fontSize: 'var(--fs-md)', marginBottom: 'var(--space-5)', lineHeight: 1.6 }}>
-                                    {quizQuestions[currentQuizQ].stem}
-                                </p>
+                                <div style={{ fontSize: 'var(--fs-md)', marginBottom: 'var(--space-5)', lineHeight: 1.6 }}>
+                                    <RichTextPreview text={quizQuestions[currentQuizQ].stem} />
+                                </div>
 
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
                                     {quizQuestions[currentQuizQ].options.map((opt, i) => {
                                         const isSelected = quizAnswer === i;
-                                        const isCorrect = i === quizQuestions[currentQuizQ].correct_answer;
                                         const optLabel = typeof opt === 'string' && opt.match(/^[A-E]\) /) ? opt.substring(3) : opt;
-
-                                        let bg = 'var(--bg-glass)';
-                                        let border = 'var(--border-primary)';
-                                        if (quizRevealed) {
-                                            if (isCorrect) { bg = 'rgba(16,185,129,0.12)'; border = 'var(--color-success)'; }
-                                            else if (isSelected && !isCorrect) { bg = 'rgba(239,68,68,0.12)'; border = 'var(--color-danger)'; }
-                                        } else if (isSelected) {
-                                            bg = 'rgba(37,99,235,0.12)'; border = 'var(--brand-accent)';
-                                        }
 
                                         return (
                                             <button
@@ -362,8 +532,9 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                                                 style={{
                                                     display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
                                                     padding: 'var(--space-3) var(--space-4)',
-                                                    background: bg, border: `1px solid ${border}`,
-                                                    borderRadius: 'var(--radius-md)', cursor: quizRevealed ? 'default' : 'pointer',
+                                                    background: isSelected ? 'rgba(37,99,235,0.12)' : 'var(--bg-glass)',
+                                                    border: `1px solid ${isSelected ? 'var(--brand-accent)' : 'var(--border-primary)'}`,
+                                                    borderRadius: 'var(--radius-md)', cursor: 'pointer',
                                                     textAlign: 'left', fontSize: 'var(--fs-sm)', color: 'var(--text-primary)',
                                                     transition: 'all var(--transition-fast)',
                                                 }}
@@ -372,7 +543,7 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                                                     width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
                                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                                                     fontSize: 'var(--fs-xs)', fontWeight: 600,
-                                                    background: isSelected ? (quizRevealed ? (isCorrect ? 'var(--color-success)' : 'var(--color-danger)') : 'var(--brand-accent)') : 'var(--bg-secondary)',
+                                                    background: isSelected ? 'var(--brand-accent)' : 'var(--bg-secondary)',
                                                     color: isSelected ? 'white' : 'var(--text-secondary)',
                                                 }}>
                                                     {String.fromCharCode(65 + i)}
@@ -383,33 +554,11 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                                     })}
                                 </div>
 
-                                {/* Explanation */}
-                                {quizRevealed && (
-                                    <div style={{
-                                        padding: 'var(--space-4)',
-                                        background: 'rgba(37,99,235,0.06)',
-                                        border: '1px solid rgba(37,99,235,0.15)',
-                                        borderRadius: 'var(--radius-md)',
-                                        marginBottom: 'var(--space-4)',
-                                    }}>
-                                        <p style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 'var(--space-1)', color: 'var(--brand-accent-light)' }}>
-                                            💡 Explanation
-                                        </p>
-                                        <p className="text-sm text-secondary">{quizQuestions[currentQuizQ].explanation}</p>
-                                    </div>
-                                )}
-
-                                {/* Action buttons */}
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)' }}>
-                                    {!quizRevealed ? (
-                                        <button className="btn btn-primary" onClick={handleQuizReveal} disabled={quizAnswer === null}>
-                                            Check Answer
-                                        </button>
-                                    ) : (
-                                        <button className="btn btn-primary" onClick={handleQuizNext}>
-                                            {currentQuizQ >= quizQuestions.length - 1 ? 'See Results' : 'Next Question'} <ArrowRight size={16} />
-                                        </button>
-                                    )}
+                                {/* Next / Finish button */}
+                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                    <button className="btn btn-primary" onClick={handleQuizAdvance}>
+                                        {currentQuizQ >= quizQuestions.length - 1 ? 'Finish Quiz' : 'Next Question'} <ArrowRight size={16} />
+                                    </button>
                                 </div>
                             </div>
                         )}

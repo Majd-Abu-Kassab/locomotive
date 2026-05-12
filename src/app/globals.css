@@ -622,7 +622,6 @@ a:hover {
 /* Page Wrapper */
 .page-wrapper {
   padding: var(--space-8);
-  max-width: 1400px;
   animation: fadeIn 0.4s ease-out;
 }
 

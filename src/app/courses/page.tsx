@@ -38,7 +38,7 @@ export default function CoursesPage() {
                     <h1>Your Courses</h1>
                     <p>7 subjects to master for the IMAT exam</p>
                 </div>
-                <div className="grid grid-3" style={{ gap: 'var(--space-6)' }}>
+                <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 'var(--space-6)' }}>
                     {courses.map(course => {
                         const pct = course.total_lessons > 0
                             ? Math.round(((course.completedLessons || 0) / course.total_lessons) * 100)

@@ -1,3 +1,251 @@
+/* ═══ Checkout Layout ═══ */
+.checkout-grid {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: var(--space-8);
+    align-items: start;
+}
+
+.checkout-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+}
+
+.checkout-sidebar {
+    position: sticky;
+    top: var(--space-6);
+}
+
+.checkout-step {
+    animation: fadeIn 0.4s ease-out;
+}
+
+.checkout-step-title {
+    font-size: var(--fs-md);
+    font-weight: 600;
+    margin-bottom: var(--space-4);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.step-number {
+    background: var(--brand-accent);
+    color: white;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+/* ═══ Course Grid ═══ */
+.course-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--space-3);
+}
+
+.course-card {
+    padding: var(--space-3);
+    border: 2px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    background: var(--bg-glass);
+    cursor: pointer;
+    text-align: left;
+    transition: all var(--transition-base);
+    font-family: var(--font-sans);
+}
+
+.course-card:hover {
+    border-color: var(--border-accent);
+    background: var(--bg-glass-hover);
+    transform: translateY(-1px);
+}
+
+.course-card.selected {
+    box-shadow: var(--shadow-glow);
+}
+
+/* ═══ Section List ═══ */
+.section-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.section-card {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    border: 2px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    background: var(--bg-glass);
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    transition: all var(--transition-base);
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+}
+
+.section-card:hover:not(.unlocked) {
+    border-color: var(--border-accent);
+    background: var(--bg-glass-hover);
+}
+
+.section-card.selected {
+    border-color: var(--brand-accent);
+    background: rgba(37, 99, 235, 0.07);
+    box-shadow: 0 0 0 1px var(--brand-accent);
+}
+
+.section-card.unlocked {
+    border-color: var(--color-success);
+    background: rgba(16, 185, 129, 0.05);
+    cursor: default;
+}
+
+.section-icon-wrap {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ═══ PayPal Buttons ═══ */
+.paypal-buttons-wrapper {
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    background: rgba(255, 255, 255, 0.02);
+    margin-bottom: var(--space-4);
+}
+
+.security-note {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    justify-content: center;
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    padding-top: var(--space-3);
+}
+
+/* ═══ Order Summary ═══ */
+.checkout-summary {
+    position: relative;
+    overflow: hidden;
+}
+
+.checkout-summary::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--brand-accent), var(--brand-accent-light));
+}
+
+.summary-title {
+    font-size: var(--fs-md);
+    font-weight: 600;
+    margin-bottom: var(--space-5);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.summary-empty {
+    text-align: center;
+    padding: var(--space-8) 0;
+    color: var(--text-tertiary);
+}
+
+.summary-items {
+    background: var(--bg-glass);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+}
+
+.summary-row:last-child {
+    margin-bottom: 0;
+}
+
+.summary-total {
+    border-top: 1px solid var(--border-primary);
+    padding-top: var(--space-3);
+    margin-bottom: var(--space-5);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.summary-total-price {
+    font-weight: 700;
+    font-size: var(--fs-xl);
+    color: var(--brand-accent-light);
+}
+
+/* ═══ Coupon ═══ */
+.coupon-section {
+    margin-bottom: var(--space-5);
+}
+
+.coupon-label {
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+
+.coupon-input-row {
+    display: flex;
+    gap: var(--space-2);
+}
+
+.coupon-msg {
+    font-size: var(--fs-xs);
+    margin-top: var(--space-1);
+}
+
+/* ═══ Trust Badges ═══ */
+.trust-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+}
+
+.trust-badge {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* ═══ Legacy pricing grid (kept for compat) ═══ */
 .pricing-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -51,71 +299,20 @@
     white-space: nowrap;
 }
 
-.savings-badge {
-    position: absolute;
-    top: var(--space-4);
-    right: var(--space-4);
-    padding: 2px 10px;
-    background: rgba(16, 185, 129, 0.15);
-    color: var(--color-success);
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    border-radius: var(--radius-full);
-}
+/* ═══ Responsive ═══ */
+@media (max-width: 900px) {
+    .checkout-grid {
+        grid-template-columns: 1fr;
+    }
 
-.pricing-header {
-    margin-bottom: var(--space-6);
-}
+    .checkout-sidebar {
+        position: static;
+        order: -1;
+    }
 
-.pricing-header h3 {
-    font-size: var(--fs-lg);
-    font-weight: 600;
-    margin-bottom: var(--space-3);
-    color: var(--text-secondary);
-}
-
-.pricing-price {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-1);
-}
-
-.price {
-    font-size: var(--fs-4xl);
-    font-weight: 800;
-}
-
-.period {
-    font-size: var(--fs-base);
-    color: var(--text-tertiary);
-}
-
-.pricing-features {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    margin-bottom: var(--space-8);
-}
-
-.feature-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    font-size: var(--fs-sm);
-}
-
-.feature-item.included {
-    color: var(--text-primary);
-}
-
-.feature-item.included svg {
-    color: var(--color-success);
-    flex-shrink: 0;
-}
-
-.feature-item.excluded {
-    color: var(--text-tertiary);
-    text-decoration: line-through;
+    .course-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    }
 }
 
 @media (max-width: 768px) {
