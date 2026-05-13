@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ToastProvider } from "@/components/Toast";
+import { Analytics } from "@vercel/analytics/react";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,6 +20,7 @@ export default function RootLayout({
         <AuthProvider>
           <ToastProvider>{children}</ToastProvider>
         </AuthProvider>
+        <Analytics />
       </body>
     </html>
   );

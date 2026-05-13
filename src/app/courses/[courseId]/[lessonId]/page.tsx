@@ -222,27 +222,63 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                 {topic.lesson_type === 'video' && (
                     <div className="card" style={{
                         marginBottom: 'var(--space-6)',
-                        aspectRatio: '16/9',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: `linear-gradient(135deg, ${config.gradient})`,
-                        cursor: 'pointer', position: 'relative', overflow: 'hidden',
+                        overflow: 'hidden',
                     }}>
-                        <div style={{
-                            position: 'absolute', inset: 0,
-                            background: 'radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.3) 100%)',
-                        }} />
-                        <div style={{ textAlign: 'center', position: 'relative', zIndex: 1 }}>
+                        {topic.content_url && topic.content_type === 'video' ? (
+                            <>
+                                <div style={{
+                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                    padding: 'var(--space-3) var(--space-4)',
+                                    background: 'rgba(37,99,235,0.08)',
+                                    borderBottom: '1px solid var(--border-primary)',
+                                }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+                                        <Video size={16} style={{ color: 'var(--brand-accent-light)' }} />
+                                        Video Lecture
+                                    </span>
+                                    <a href={topic.content_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm" download>
+                                        <Download size={14} /> Download
+                                    </a>
+                                </div>
+                                <video
+                                    controls
+                                    controlsList="nodownload"
+                                    preload="metadata"
+                                    style={{
+                                        width: '100%',
+                                        maxHeight: '70vh',
+                                        background: '#000',
+                                        display: 'block',
+                                    }}
+                                >
+                                    <source src={topic.content_url} />
+                                    Your browser does not support the video tag.
+                                </video>
+                            </>
+                        ) : (
                             <div style={{
-                                width: '72px', height: '72px', borderRadius: '50%',
-                                background: 'var(--brand-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                margin: '0 auto var(--space-4)', boxShadow: '0 0 40px rgba(37,99,235,0.5)',
-                                transition: 'transform var(--transition-base), box-shadow var(--transition-base)',
+                                aspectRatio: '16/9',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                background: `linear-gradient(135deg, ${config.gradient})`,
+                                position: 'relative',
                             }}>
-                                <Play size={32} fill="white" color="white" />
+                                <div style={{
+                                    position: 'absolute', inset: 0,
+                                    background: 'radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.3) 100%)',
+                                }} />
+                                <div style={{ textAlign: 'center', position: 'relative', zIndex: 1 }}>
+                                    <div style={{
+                                        width: '72px', height: '72px', borderRadius: '50%',
+                                        background: 'var(--brand-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        margin: '0 auto var(--space-4)', boxShadow: '0 0 40px rgba(37,99,235,0.5)',
+                                    }}>
+                                        <Play size={32} fill="white" color="white" />
+                                    </div>
+                                    <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>Video Lecture</p>
+                                    <p className="text-sm text-secondary">Coming soon — check back later</p>
+                                </div>
                             </div>
-                            <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>Video Lecture</p>
-                            <p className="text-sm text-secondary">Click to play • Estimated 15–20 min</p>
-                        </div>
+                        )}
                     </div>
                 )}
 

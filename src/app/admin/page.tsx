@@ -323,11 +323,12 @@ export default function AdminPage() {
         if (error) { addToast(error.message, 'error'); setUploadingContent(false); return; }
         if (url) {
             const ext = file.name.split('.').pop()?.toLowerCase();
-            const contentType = ext === 'pdf' ? 'pdf' : (ext === 'pptx' || ext === 'ppt') ? 'presentation' : 'file';
+            const contentType = ext === 'pdf' ? 'pdf' : (ext === 'pptx' || ext === 'ppt') ? 'presentation' : ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext || '') ? 'video' : 'file';
             const { error: updateErr } = await adminUpdateTopicContent(contentTopicId, url, contentType);
             if (updateErr) { addToast(updateErr.message, 'error'); }
             else {
-                addToast(`${contentType === 'pdf' ? 'PDF' : 'Presentation'} uploaded successfully!`, 'success');
+                const label = contentType === 'pdf' ? 'PDF' : contentType === 'video' ? 'Video' : 'Presentation';
+                addToast(`${label} uploaded successfully!`, 'success');
                 setCourses(await getCourses());
             }
         }
@@ -585,10 +586,10 @@ export default function AdminPage() {
                         {/* Content Upload */}
                         <div className="card" style={{ marginTop: 'var(--space-6)' }}>
                             <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                                <Upload size={18} /> Upload Presentations & PDFs
+                                <Upload size={18} /> Upload Content (Videos, PDFs, Presentations)
                             </h3>
                             <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-4)' }}>
-                                Upload PDF study materials or PowerPoint presentations to any topic. Max 50MB per file.
+                                Upload videos, PDF study materials, or PowerPoint presentations to any topic. Max 50MB per file.
                             </p>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
                                 <div className="input-group">
@@ -634,7 +635,7 @@ export default function AdminPage() {
                                     if (!contentCourseId || !contentTopicId) return;
                                     const input = document.createElement('input');
                                     input.type = 'file';
-                                    input.accept = '.pdf,.pptx,.ppt';
+                                    input.accept = '.pdf,.pptx,.ppt,.mp4,.webm,.mov,.avi,.mkv';
                                     input.onchange = (e) => {
                                         const file = (e.target as HTMLInputElement).files?.[0];
                                         if (file) handleContentUpload(file);
@@ -651,7 +652,7 @@ export default function AdminPage() {
                                     <>
                                         <Upload size={32} style={{ color: 'var(--text-tertiary)', marginBottom: 'var(--space-2)' }} />
                                         <p style={{ fontWeight: 600, marginBottom: 'var(--space-1)' }}>Drop file here or click to browse</p>
-                                        <p className="text-xs text-secondary">PDF, PPTX • Max 50MB</p>
+                                        <p className="text-xs text-secondary">MP4, WebM, MOV, PDF, PPTX • Max 50MB</p>
                                     </>
                                 )}
                             </div>
@@ -674,7 +675,7 @@ export default function AdminPage() {
                                                 fontSize: 'var(--fs-xs)',
                                             }}>
                                                 <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                                                    <FileText size={14} style={{ color: 'var(--color-warning)' }} />
+                                                    {t.content_type === 'video' ? <Video size={14} style={{ color: '#ef4444' }} /> : <FileText size={14} style={{ color: 'var(--color-warning)' }} />}
                                                     <strong>{t.name}</strong>
                                                     <span className="badge" style={{ fontSize: 9 }}>{t.content_type}</span>
                                                 </span>

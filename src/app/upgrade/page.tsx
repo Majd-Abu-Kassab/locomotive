@@ -56,6 +56,8 @@ function PayPalCheckoutButtons({
                     }}
                     fundingSource={undefined}
                     createOrder={async () => {
+                        console.log('=== Creating PayPal order ===');
+                        console.log('finalPrice:', finalPrice, 'currency:', currency, 'sectionId:', sectionId);
                         const res = await fetch('/api/paypal/create-order', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -67,9 +69,11 @@ function PayPalCheckoutButtons({
                             }),
                         });
                         const data = await res.json();
+                        console.log('Create order response:', res.status, data);
                         if (!data.orderId) {
-                            onError('Failed to create PayPal order. Please try again.');
-                            throw new Error('No orderId');
+                            const errMsg = data.error || data.details?.message || 'Failed to create PayPal order';
+                            onError(`PayPal error: ${errMsg} (status ${res.status})`);
+                            throw new Error('No orderId: ' + JSON.stringify(data));
                         }
 
                         // Create pending payment record
