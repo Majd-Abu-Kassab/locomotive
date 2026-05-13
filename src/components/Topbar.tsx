@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Search, Bell, User, ChevronDown, LogOut, Settings, BookOpen, HelpCircle, X } from 'lucide-react';
+import { Search, Bell, User, ChevronDown, LogOut, Settings, BookOpen, HelpCircle, X, Menu } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCourses, CourseWithModules } from '@/lib/api';
 import './Topbar.css';
@@ -15,7 +15,11 @@ interface SearchResult {
     icon: React.ReactNode;
 }
 
-export default function Topbar() {
+interface TopbarProps {
+    onMenuToggle?: () => void;
+}
+
+export default function Topbar({ onMenuToggle }: TopbarProps) {
     const { profile, user, signOut } = useAuth();
     const [searchQuery, setSearchQuery] = useState('');
     const [showDropdown, setShowDropdown] = useState(false);
@@ -121,6 +125,18 @@ export default function Topbar() {
 
     return (
         <header className="topbar">
+            <div className="topbar-left-actions">
+                {onMenuToggle && (
+                    <button 
+                        className="mobile-menu-btn" 
+                        onClick={onMenuToggle}
+                        aria-label="Toggle menu"
+                    >
+                        <Menu size={20} />
+                    </button>
+                )}
+            </div>
+            
             <div className="topbar-search" ref={searchRef}>
                 <Search size={18} className="search-icon" />
                 <input

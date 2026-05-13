@@ -72,6 +72,11 @@
     flex-shrink: 0;
 }
 
+.mobile-only {
+    display: none;
+}
+
+
 .collapse-btn:hover {
     background: var(--bg-glass-hover);
     color: var(--text-primary);
@@ -191,3 +196,24 @@
     font-size: var(--fs-sm);
     font-weight: 500;
 }
+
+/* Mobile styles */
+@media (max-width: 768px) {
+    .sidebar {
+        transform: translateX(-100%);
+        width: var(--sidebar-width) !important;
+    }
+    
+    .sidebar.mobile-open {
+        transform: translateX(0);
+        box-shadow: var(--shadow-xl);
+    }
+    
+    .desktop-only {
+        display: none !important;
+    }
+    
+    .mobile-only {
+        display: flex !important;
+    }
+}

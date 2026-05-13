@@ -25,6 +25,7 @@ import {
     GraduationCap,
     Settings,
     Receipt,
+    X,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import './Sidebar.css';
@@ -76,7 +77,12 @@ const adminItems = {
     ],
 };
 
-export default function Sidebar() {
+interface SidebarProps {
+    mobileMenuOpen?: boolean;
+    setMobileMenuOpen?: (open: boolean) => void;
+}
+
+export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarProps) {
     const [collapsed, setCollapsed] = useState(false);
     const pathname = usePathname();
     const { profile } = useAuth();
@@ -85,7 +91,7 @@ export default function Sidebar() {
     const isPaidPlan = profile?.plan && profile.plan !== 'free-trial';
 
     return (
-        <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+        <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileMenuOpen ? 'mobile-open' : ''}`}>
             <div className="sidebar-header">
                 <Link href="/dashboard" className="sidebar-logo">
                     <div className="logo-icon">
@@ -94,12 +100,21 @@ export default function Sidebar() {
                     {!collapsed && <span className="logo-text">LOCOMOTIVE</span>}
                 </Link>
                 <button
-                    className="collapse-btn"
+                    className="collapse-btn desktop-only"
                     onClick={() => setCollapsed(!collapsed)}
                     aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 >
                     {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
                 </button>
+                {setMobileMenuOpen && (
+                    <button
+                        className="collapse-btn mobile-only"
+                        onClick={() => setMobileMenuOpen(false)}
+                        aria-label="Close sidebar"
+                    >
+                        <X size={16} />
+                    </button>
+                )}
             </div>
 
             <nav className="sidebar-nav">
@@ -116,6 +131,7 @@ export default function Sidebar() {
                                             href={item.href}
                                             className={`nav-item ${isActive ? 'active' : ''} ${item.name === 'Upgrade Plan' ? 'upgrade-item' : ''}`}
                                             title={collapsed ? item.name : undefined}
+                                            onClick={() => setMobileMenuOpen && setMobileMenuOpen(false)}
                                         >
                                             <Icon size={18} />
                                             {!collapsed && <span>{item.name}</span>}
@@ -137,7 +153,12 @@ export default function Sidebar() {
                                 const Icon = item.icon;
                                 return (
                                     <li key={item.href}>
-                                        <Link href={item.href} className={`nav-item ${isActive ? 'active' : ''}`} title={collapsed ? item.name : undefined}>
+                                        <Link 
+                                            href={item.href} 
+                                            className={`nav-item ${isActive ? 'active' : ''}`} 
+                                            title={collapsed ? item.name : undefined}
+                                            onClick={() => setMobileMenuOpen && setMobileMenuOpen(false)}
+                                        >
                                             <Icon size={18} />
                                             {!collapsed && <span>{item.name}</span>}
                                             {isActive && <div className="active-indicator" />}
