@@ -969,7 +969,7 @@ export async function adminFindUserByEmail(email: string): Promise<{ id: string;
     const { data, error } = await supabase
         .from('profiles')
         .select('id, email, first_name, last_name')
-        .ilike('email', email.trim())
+        .eq('email', email.trim().toLowerCase())
         .single();
 
     if (error || !data) return null;

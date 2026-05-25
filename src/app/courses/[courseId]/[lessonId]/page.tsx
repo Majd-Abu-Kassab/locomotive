@@ -5,10 +5,10 @@ import AppLayout from '@/components/AppLayout';
 import Link from 'next/link';
 import {
     ArrowLeft, ArrowRight, Play, FileText, CheckCircle2, Circle,
-    Loader2, Video, HelpCircle, BookOpen, ChevronRight, Download, Clock
+    Loader2, Video, HelpCircle, BookOpen, ChevronRight, Download, Clock, Lock
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getCourse, getQuestions, markTopicComplete, markTopicIncomplete, CourseWithModules, TopicWithProgress, QuestionRow } from '@/lib/api';
+import { getCourse, getCourseSections, getQuestions, markTopicComplete, markTopicIncomplete, CourseWithModules, TopicWithProgress, QuestionRow, CourseSection } from '@/lib/api';
 import { RichTextPreview } from '@/components/RichTextEditor';
 import 'katex/dist/katex.min.css';
 
@@ -16,6 +16,7 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
     const { courseId, lessonId } = use(params);
     const { user } = useAuth();
     const [course, setCourse] = useState<CourseWithModules | null>(null);
+    const [sections, setSections] = useState<CourseSection[]>([]);
     const [loading, setLoading] = useState(true);
     const [completing, setCompleting] = useState(false);
     const [topicCompleted, setTopicCompleted] = useState(false);
@@ -32,35 +33,56 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
 
     useEffect(() => {
         async function load() {
-            const data = await getCourse(courseId, user?.id);
+            const [data, sects] = await Promise.all([
+                getCourse(courseId, user?.id),
+                getCourseSections(courseId, user?.id),
+            ]);
             setCourse(data);
+            setSections(sects);
             setLoading(false);
         }
         load();
     }, [courseId, user?.id]);
 
     // Find topic + navigation info
-    const { topic, moduleName, prevTopic, nextTopic, allTopics } = useMemo(() => {
-        if (!course) return { topic: null, moduleName: '', prevTopic: null, nextTopic: null, allTopics: [] as TopicWithProgress[] };
+    const { topic, moduleName, moduleId, prevTopic, nextTopic, allTopics } = useMemo(() => {
+        if (!course) return { topic: null, moduleName: '', moduleId: '', prevTopic: null, nextTopic: null, allTopics: [] as TopicWithProgress[] };
 
-        const all: { topic: TopicWithProgress; moduleName: string }[] = [];
+        const all: { topic: TopicWithProgress; moduleName: string; moduleId: string }[] = [];
         for (const m of course.modules) {
             for (const t of m.topics) {
-                all.push({ topic: t, moduleName: m.name });
+                all.push({ topic: t, moduleName: m.name, moduleId: m.id });
             }
         }
 
         const idx = all.findIndex(a => a.topic.id === lessonId);
-        if (idx === -1) return { topic: null, moduleName: '', prevTopic: null, nextTopic: null, allTopics: all.map(a => a.topic) };
+        if (idx === -1) return { topic: null, moduleName: '', moduleId: '', prevTopic: null, nextTopic: null, allTopics: all.map(a => a.topic) };
 
         return {
             topic: all[idx].topic,
             moduleName: all[idx].moduleName,
+            moduleId: all[idx].moduleId,
             prevTopic: idx > 0 ? all[idx - 1].topic : null,
             nextTopic: idx < all.length - 1 ? all[idx + 1].topic : null,
             allTopics: all.map(a => a.topic),
         };
     }, [course, lessonId]);
+
+    // Check lock status
+    const isLocked = useMemo(() => {
+        if (!moduleId || sections.length === 0) return false;
+        
+        let targetSection = null;
+        for (const s of sections) {
+            if (s.moduleIds?.includes(moduleId)) {
+                targetSection = s;
+                break;
+            }
+        }
+        
+        if (!targetSection) return false; // Not in any section = free
+        return !targetSection.unlocked;
+    }, [moduleId, sections]);
 
     // Set initial completion state
     useEffect(() => {
@@ -217,8 +239,27 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                 </div>
 
                 {/* ===== CONTENT AREA ===== */}
-
-                {/* Video Content */}
+                
+                {isLocked ? (
+                    <div className="card" style={{ marginBottom: 'var(--space-6)', textAlign: 'center', padding: 'var(--space-8) var(--space-4)' }}>
+                        <div style={{
+                            width: '80px', height: '80px', borderRadius: '50%',
+                            background: 'rgba(245,158,11,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            margin: '0 auto var(--space-4)'
+                        }}>
+                            <Lock size={36} style={{ color: 'var(--color-warning)' }} />
+                        </div>
+                        <h2 style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, marginBottom: 'var(--space-2)' }}>Premium Content</h2>
+                        <p className="text-secondary" style={{ marginBottom: 'var(--space-6)', maxWidth: 450, margin: '0 auto var(--space-6)' }}>
+                            This lesson is part of a premium section. Please unlock the section to access this content.
+                        </p>
+                        <Link href={`/courses/${courseId}`} className="btn btn-primary btn-lg" style={{ display: 'inline-flex' }}>
+                            View Course Options
+                        </Link>
+                    </div>
+                ) : (
+                    <>
+                        {/* Video Content */}
                 {topic.lesson_type === 'video' && (
                     <div className="card" style={{
                         marginBottom: 'var(--space-6)',
@@ -602,22 +643,26 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                 )}
 
                 {/* Key Points */}
-                <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
-                    <h3 style={{ fontSize: 'var(--fs-lg)', fontWeight: 600, marginBottom: 'var(--space-4)' }}>Key Points</h3>
-                    <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                        {[
-                            'Core concept and definitions',
-                            'Important formulas and relationships',
-                            'Common exam questions on this topic',
-                            'Clinical applications and examples',
-                        ].map((point, i) => (
-                            <li key={i} style={{ display: 'flex', alignItems: 'start', gap: 'var(--space-3)', padding: 'var(--space-2) 0' }}>
-                                <CheckCircle2 size={16} style={{ color: 'var(--color-success)', marginTop: '2px', flexShrink: 0 }} />
-                                <span className="text-secondary">{point}</span>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
+                {!isLocked && (
+                    <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
+                        <h3 style={{ fontSize: 'var(--fs-lg)', fontWeight: 600, marginBottom: 'var(--space-4)' }}>Key Points</h3>
+                        <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                            {[
+                                'Core concept and definitions',
+                                'Important formulas and relationships',
+                                'Common exam questions on this topic',
+                                'Clinical applications and examples',
+                            ].map((point, i) => (
+                                <li key={i} style={{ display: 'flex', alignItems: 'start', gap: 'var(--space-3)', padding: 'var(--space-2) 0' }}>
+                                    <CheckCircle2 size={16} style={{ color: 'var(--color-success)', marginTop: '2px', flexShrink: 0 }} />
+                                    <span className="text-secondary">{point}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+                    </>
+                )}
 
                 {/* Prev / Next Navigation */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)' }}>

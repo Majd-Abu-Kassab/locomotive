@@ -3,12 +3,15 @@
 import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { useRouter } from 'next/navigation';
-import { Clock, Infinity, Check, ArrowRight, Loader2 } from 'lucide-react';
+import { Clock, Infinity, Check, ArrowRight, Loader2, Lock } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { getCourses, getQuestions, CourseWithModules } from '@/lib/api';
 import './create-test.css';
 
 export default function CreateTestPage() {
     const router = useRouter();
+    const { profile } = useAuth();
+    const isPaidPlan = profile?.plan && profile.plan !== 'free-trial';
     const [mode, setMode] = useState<'timed' | 'untimed'>('timed');
     const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
     const [questionCount, setQuestionCount] = useState(60);
@@ -41,11 +44,19 @@ export default function CreateTestPage() {
             subjects: subjectNames,
             difficulty: difficulty,
             source: source,
-            limit: questionCount,
+            limit: questionCount * 2, // Overfetch slightly to allow client-side filtering if needed
         });
 
+        // Filter out premium questions if user is on free plan
+        let finalQuestions = questions;
+        if (!isPaidPlan) {
+            finalQuestions = finalQuestions.filter(q => q.source !== 'locomotive-original');
+        }
+        
+        finalQuestions = finalQuestions.slice(0, questionCount);
+
         // Store questions in sessionStorage for the test page
-        sessionStorage.setItem('test_questions', JSON.stringify(questions));
+        sessionStorage.setItem('test_questions', JSON.stringify(finalQuestions));
         sessionStorage.setItem('test_mode', mode);
         sessionStorage.setItem('test_name', `Custom Test - ${selectedSubjects.length > 0 ? selectedSubjects.join(', ') : 'All Subjects'}`);
         router.push('/test/custom');
@@ -121,21 +132,27 @@ export default function CreateTestPage() {
                     <h2 className="ct-section-title">Question Pool</h2>
                     <div className="ct-pool-grid">
                         {[
-                            { value: 'all', label: 'All Questions', desc: 'Mix from all sources' },
-                            { value: 'official-imat', label: 'Official IMAT', desc: 'Past exam papers' },
-                            { value: 'locomotive-original', label: 'LOCOMOTIVE Original', desc: 'Our exclusive questions' },
-                            { value: 'italian-medical', label: 'Italian Medical', desc: 'Translated papers' },
-                        ].map(pool => (
+                            { value: 'all', label: 'All Questions', desc: 'Mix from all sources', premium: false },
+                            { value: 'official-imat', label: 'Official IMAT', desc: 'Past exam papers', premium: false },
+                            { value: 'locomotive-original', label: 'LOCOMOTIVE Original', desc: 'Our exclusive questions', premium: true },
+                            { value: 'italian-medical', label: 'Italian Medical', desc: 'Translated papers', premium: false },
+                        ].map(pool => {
+                            const isLocked = pool.premium && !isPaidPlan;
+                            return (
                             <button
                                 key={pool.value}
                                 className={`ct-pool-btn ${source === pool.value ? 'active' : ''}`}
-                                onClick={() => setSource(pool.value as typeof source)}
+                                onClick={() => !isLocked && setSource(pool.value as typeof source)}
+                                style={{ opacity: isLocked ? 0.6 : 1, cursor: isLocked ? 'not-allowed' : 'pointer' }}
                             >
-                                <strong>{pool.label}</strong>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                                    <strong>{pool.label}</strong>
+                                    {isLocked && <Lock size={14} style={{ color: 'var(--color-warning)' }} />}
+                                </div>
                                 <span className="text-xs text-secondary">{pool.desc}</span>
-                                {source === pool.value && <div className="ct-mode-check"><Check size={14} /></div>}
+                                {source === pool.value && !isLocked && <div className="ct-mode-check"><Check size={14} /></div>}
                             </button>
-                        ))}
+                        )})}
                     </div>
                 </div>
 

@@ -87,7 +87,6 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
     const pathname = usePathname();
     const { profile } = useAuth();
 
-    const trialDays = profile?.trial_days_remaining ?? 0;
     const isPaidPlan = profile?.plan && profile.plan !== 'free-trial';
 
     return (
@@ -171,14 +170,6 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                 )}
             </nav>
 
-            {!collapsed && !isPaidPlan && (
-                <div className="sidebar-footer">
-                    <div className="trial-badge">
-                        <Crown size={14} />
-                        <span>{trialDays} day{trialDays !== 1 ? 's' : ''} left on trial</span>
-                    </div>
-                </div>
-            )}
         </aside>
     );
 }

@@ -128,7 +128,7 @@ export default function ProfilePage() {
                         <p className="text-secondary text-sm">{email}</p>
                         <p className="text-xs" style={{ color: 'var(--color-warning)', marginTop: 'var(--space-1)' }}>
                             {profile.plan === 'free-trial'
-                                ? `Free Trial • ${profile.trial_days_remaining} days remaining`
+                                ? 'Free Plan'
                                 : profile.plan.charAt(0).toUpperCase() + profile.plan.slice(1)
                             }
                         </p>
