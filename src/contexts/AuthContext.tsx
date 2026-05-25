@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, ReactNode } from 'react';
 import { createClient } from '@/lib/supabase';
 import type { User, AuthError } from '@supabase/supabase-js';
 
@@ -46,7 +46,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [profile, setProfile] = useState<Profile | null>(null);
     const [loading, setLoading] = useState(true);
 
-    const supabase = createClient();
+    // Memoize the client so it's created once per component lifecycle, not on every render
+    const supabase = useMemo(() => createClient(), []);
 
     const fetchProfile = useCallback(async (userId: string) => {
         const { data, error } = await supabase
