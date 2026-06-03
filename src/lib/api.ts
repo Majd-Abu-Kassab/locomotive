@@ -1,6 +1,18 @@
 import { createClient } from '@/lib/supabase';
 
-const supabase = createClient();
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabase() {
+    if (!_supabase) _supabase = createClient();
+    return _supabase;
+}
+
+// Proxy object that lazily initializes the Supabase client on first use
+// This prevents the client from being created at module import time (which fails during SSR on Vercel)
+const supabase = new Proxy({} as ReturnType<typeof createClient>, {
+    get(_target, prop) {
+        return (getSupabase() as unknown as Record<string | symbol, unknown>)[prop];
+    },
+});
 
 // ===== TYPES =====
 export interface CourseWithModules {
@@ -78,24 +90,34 @@ export interface ScheduleEventRow {
 
 // ===== COURSES =====
 export async function getCourses(userId?: string): Promise<CourseWithModules[]> {
-    // Fetch courses, modules, topics, and optional progress all in parallel
-    const [coursesRes, modulesRes, topicsRes, progressRes] = await Promise.all([
-        supabase.from('courses').select('*').order('sort_order'),
-        supabase.from('modules').select('*').order('sort_order'),
-        supabase.from('topics').select('*').order('sort_order'),
-        userId
-            ? supabase.from('user_topic_progress').select('topic_id').eq('user_id', userId).eq('completed', true)
-            : Promise.resolve({ data: null }),
-    ]);
+    // Fetch courses, modules, topics
+    const { data: coursesData } = await supabase
+        .from('courses')
+        .select('*')
+        .order('sort_order');
 
-    const coursesData = coursesRes.data;
-    const modulesData = modulesRes.data;
-    const topicsData = topicsRes.data;
+    const { data: modulesData } = await supabase
+        .from('modules')
+        .select('*')
+        .order('sort_order');
 
-    // Build progress map
-    const progressMap: Record<string, boolean> = {};
-    if (progressRes.data) {
-        (progressRes.data as { topic_id: string }[]).forEach(p => { progressMap[p.topic_id] = true; });
+    const { data: topicsData } = await supabase
+        .from('topics')
+        .select('*')
+        .order('sort_order');
+
+    // Fetch user progress if logged in
+    let progressMap: Record<string, boolean> = {};
+    if (userId) {
+        const { data: progressData } = await supabase
+            .from('user_topic_progress')
+            .select('topic_id, completed')
+            .eq('user_id', userId)
+            .eq('completed', true);
+
+        if (progressData) {
+            progressData.forEach(p => { progressMap[p.topic_id] = true; });
+        }
     }
 
     if (!coursesData || !modulesData || !topicsData) return [];
@@ -451,16 +473,24 @@ export async function getCourseSections(courseId: string, userId?: string): Prom
     if (!sections) return [];
 
     let unlockedSectionIds = new Set<string>();
-    if (userId && sections.length > 0) {
-        // Single query: fetch both 'active' and 'free_grant' statuses at once
+    if (userId) {
         const { data: access } = await supabase
             .from('student_section_access')
             .select('section_id')
             .eq('user_id', userId)
-            .in('status', ['active', 'free_grant'])
+            .eq('status', 'active')
+            .in('section_id', sections.map(s => s.id));
+
+        // Also check free_grant
+        const { data: grants } = await supabase
+            .from('student_section_access')
+            .select('section_id')
+            .eq('user_id', userId)
+            .eq('status', 'free_grant')
             .in('section_id', sections.map(s => s.id));
 
         (access || []).forEach(a => unlockedSectionIds.add(a.section_id));
+        (grants || []).forEach(a => unlockedSectionIds.add(a.section_id));
     }
 
     return sections.map(s => ({
@@ -766,11 +796,11 @@ export async function adminGetSubjectPerformance(): Promise<SubjectPerformance[]
     })).sort((a, b) => b.totalAttempts - a.totalAttempts);
 }
 
-export async function adminGetQuestionAnalytics(limit = 20, sortBy: 'hardest' | 'easiest' | 'mostAttempted' = 'hardest'): Promise<QuestionAnalytics[]> {
-    const { data, error } = await supabase
+export async function adminGetQuestionAnalytics(limit = 30, sortBy: 'hardest' | 'easiest' | 'mostAttempted' = 'hardest'): Promise<QuestionAnalytics[]> {
+    // Get all test answers with question info
+    const { data } = await supabase
         .from('test_answers')
-        .select('question_id, is_correct, questions!inner(id, subject, topic, difficulty, stem)')
-        .limit(5000); // cap to prevent full table scan
+        .select('question_id, is_correct, questions!inner(id, subject, topic, difficulty, stem)');
 
     if (!data || data.length === 0) return [];
 
@@ -814,8 +844,7 @@ export async function adminGetStudentRoster(): Promise<StudentSummary[]> {
     const { data: tests } = await supabase
         .from('test_results')
         .select('user_id, score, max_score, correct, total_questions, created_at')
-        .order('created_at', { ascending: false })
-        .limit(1000); // prevent full table scan as platform grows
+        .order('created_at', { ascending: false });
 
     const testsByUser: Record<string, typeof tests> = {};
     for (const t of (tests || [])) {

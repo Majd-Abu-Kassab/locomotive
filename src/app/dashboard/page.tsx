@@ -25,15 +25,20 @@ export default function DashboardPage() {
             return;
         }
         async function load() {
-            if (user) {
-                const [coursesData, testsData] = await Promise.all([
-                    getCourses(user.id),
-                    getTestResults(user.id),
-                ]);
-                setCourses(coursesData);
-                if (testsData.length > 0) setLastTest(testsData[0]);
+            try {
+                if (user) {
+                    const [coursesData, testsData] = await Promise.all([
+                        getCourses(user.id),
+                        getTestResults(user.id),
+                    ]);
+                    setCourses(coursesData);
+                    if (testsData.length > 0) setLastTest(testsData[0]);
+                }
+            } catch (err) {
+                console.error('Dashboard data load error:', err);
+            } finally {
+                setDataLoading(false);
             }
-            setDataLoading(false);
         }
         if (!loading) load();
     }, [user, loading]);

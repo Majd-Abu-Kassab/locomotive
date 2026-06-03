@@ -117,8 +117,9 @@ export default function AdminPage() {
 
     useEffect(() => {
         async function load() {
-            const c = await getCourses();
+            const [c, q] = await Promise.all([getCourses(), getAllQuestions()]);
             setCourses(c);
+            setQuestions(q);
             setLoading(false);
         }
         load();
@@ -169,9 +170,6 @@ export default function AdminPage() {
         }
         if (tab === 'team') {
             adminGetTeamMembers().then(setTeamMembers);
-        }
-        if (tab === 'questions' && questions.length === 0) {
-            getAllQuestions().then(setQuestions);
         }
     }, [tab, courses, qSortBy]);
 

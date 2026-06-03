@@ -46,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [profile, setProfile] = useState<Profile | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // Memoize the client so it's created once per component lifecycle, not on every render
+    // Memoize the Supabase client so it's created once and remains stable across renders
     const supabase = useMemo(() => createClient(), []);
 
     const fetchProfile = useCallback(async (userId: string) => {
@@ -73,16 +73,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         // Get initial session
         const initAuth = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            const currentUser = session?.user ?? null;
-            setUser(currentUser);
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                const currentUser = session?.user ?? null;
+                setUser(currentUser);
 
-            if (currentUser) {
-                const p = await fetchProfile(currentUser.id);
-                setProfile(p);
+                if (currentUser) {
+                    const p = await fetchProfile(currentUser.id);
+                    setProfile(p);
+                }
+            } catch (error) {
+                console.error('Auth initialization error:', error);
+            } finally {
+                setLoading(false);
             }
-
-            setLoading(false);
         };
 
         initAuth();
