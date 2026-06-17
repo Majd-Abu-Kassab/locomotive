@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getStudentPayments, StudentPaymentRow } from '@/lib/api';
 import {
     Loader2, Receipt, CheckCircle2, Clock, XCircle, RotateCcw,
@@ -49,16 +51,28 @@ function formatTime(dateStr: string): string {
 
 export default function OrderHistoryPage() {
     const { user } = useAuth();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const [payments, setPayments] = useState<StudentPaymentRow[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         if (!user?.id) return;
-        getStudentPayments(user.id).then(p => {
-            setPayments(p);
-            setLoading(false);
-        });
-    }, [user?.id]);
+        const userId = user.id;
+        const signal = getSignal();
+        async function fetchPayments() {
+            try {
+                const p = await getStudentPayments(supabase, userId, signal);
+                setPayments(p);
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error fetching student payments:', err);
+            } finally {
+                setLoading(false);
+            }
+        }
+        fetchPayments();
+    }, [user?.id, supabase, getSignal]);
 
     if (loading) {
         return (

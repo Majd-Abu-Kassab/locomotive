@@ -1,18 +1,22 @@
-import { createClient } from '@/lib/supabase';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-let _supabase: ReturnType<typeof createClient> | null = null;
-function getSupabase() {
-    if (!_supabase) _supabase = createClient();
-    return _supabase;
+function isAbort(error: any) {
+    if (!error) return false;
+    if (error.name === 'AbortError') return true;
+    if (typeof error.message === 'string' && (
+        error.message === 'AbortError' ||
+        error.message.includes('AbortError') ||
+        error.message.includes('aborted')
+    )) return true;
+    if (typeof error.details === 'string' && error.details.includes('AbortError')) return true;
+    return false;
 }
 
-// Proxy object that lazily initializes the Supabase client on first use
-// This prevents the client from being created at module import time (which fails during SSR on Vercel)
-const supabase = new Proxy({} as ReturnType<typeof createClient>, {
-    get(_target, prop) {
-        return (getSupabase() as unknown as Record<string | symbol, unknown>)[prop];
-    },
-});
+function throwIfAborted(error: unknown, signal?: AbortSignal): void {
+    if (isAbort(error) || signal?.aborted) {
+        throw (error instanceof Error ? error : new DOMException('Aborted', 'AbortError'));
+    }
+}
 
 // ===== TYPES =====
 export interface CourseWithModules {
@@ -89,22 +93,25 @@ export interface ScheduleEventRow {
 }
 
 // ===== COURSES =====
-export async function getCourses(userId?: string): Promise<CourseWithModules[]> {
+export async function getCourses(supabase: SupabaseClient, userId?: string, signal?: AbortSignal): Promise<CourseWithModules[]> {
     // Fetch courses, modules, topics
     const { data: coursesData } = await supabase
         .from('courses')
         .select('*')
-        .order('sort_order');
+        .order('sort_order')
+        .abortSignal(signal!);
 
     const { data: modulesData } = await supabase
         .from('modules')
         .select('*')
-        .order('sort_order');
+        .order('sort_order')
+        .abortSignal(signal!);
 
     const { data: topicsData } = await supabase
         .from('topics')
         .select('*')
-        .order('sort_order');
+        .order('sort_order')
+        .abortSignal(signal!);
 
     // Fetch user progress if logged in
     let progressMap: Record<string, boolean> = {};
@@ -113,13 +120,15 @@ export async function getCourses(userId?: string): Promise<CourseWithModules[]> 
             .from('user_topic_progress')
             .select('topic_id, completed')
             .eq('user_id', userId)
-            .eq('completed', true);
+            .eq('completed', true)
+            .abortSignal(signal!);
 
         if (progressData) {
             progressData.forEach(p => { progressMap[p.topic_id] = true; });
         }
     }
 
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (!coursesData || !modulesData || !topicsData) return [];
 
     // Assemble nested structure
@@ -144,18 +153,18 @@ export async function getCourses(userId?: string): Promise<CourseWithModules[]> 
     });
 }
 
-export async function getCourse(courseId: string, userId?: string): Promise<CourseWithModules | null> {
-    const courses = await getCourses(userId);
+export async function getCourse(supabase: SupabaseClient, courseId: string, userId?: string, signal?: AbortSignal): Promise<CourseWithModules | null> {
+    const courses = await getCourses(supabase, userId, signal);
     return courses.find(c => c.id === courseId) || null;
 }
 
 // ===== QUESTIONS =====
-export async function getQuestions(filters?: {
+export async function getQuestions(supabase: SupabaseClient, filters?: {
     subjects?: string[];
     difficulty?: string;
     source?: string;
     limit?: number;
-}): Promise<QuestionRow[]> {
+}, signal?: AbortSignal): Promise<QuestionRow[]> {
     let query = supabase.from('questions').select('*');
 
     if (filters?.subjects && filters.subjects.length > 0) {
@@ -171,8 +180,12 @@ export async function getQuestions(filters?: {
         query = query.limit(filters.limit);
     }
 
-    const { data, error } = await query;
-    if (error) { console.error('Error fetching questions:', error); return []; }
+    const { data, error } = await query.abortSignal(signal!);
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error('Error fetching questions:', error);
+        return [];
+    }
 
     // Parse options from JSON
     return (data || []).map(q => ({
@@ -182,18 +195,23 @@ export async function getQuestions(filters?: {
 }
 
 // ===== TEST RESULTS =====
-export async function getTestResults(userId: string): Promise<TestResultRow[]> {
+export async function getTestResults(supabase: SupabaseClient, userId: string, signal?: AbortSignal): Promise<TestResultRow[]> {
     const { data, error } = await supabase
         .from('test_results')
         .select('*')
         .eq('user_id', userId)
-        .order('date', { ascending: false });
+        .order('date', { ascending: false })
+        .abortSignal(signal!);
 
-    if (error) { console.error('Error fetching test results:', error); return []; }
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error('Error fetching test results:', error);
+        return [];
+    }
     return data || [];
 }
 
-export async function saveTestResult(result: {
+export async function saveTestResult(supabase: SupabaseClient, result: {
     user_id: string;
     name: string;
     duration: string;
@@ -219,7 +237,7 @@ export async function saveTestResult(result: {
     };
 }
 
-export async function saveTestAnswers(answers: {
+export async function saveTestAnswers(supabase: SupabaseClient, answers: {
     test_result_id: string;
     question_id: string;
     selected_answer: number | null;
@@ -230,18 +248,23 @@ export async function saveTestAnswers(answers: {
 }
 
 // ===== SCHEDULE =====
-export async function getScheduleEvents(userId: string): Promise<ScheduleEventRow[]> {
+export async function getScheduleEvents(supabase: SupabaseClient, userId: string, signal?: AbortSignal): Promise<ScheduleEventRow[]> {
     const { data, error } = await supabase
         .from('schedule_events')
         .select('*')
         .eq('user_id', userId)
-        .order('date');
+        .order('date')
+        .abortSignal(signal!);
 
-    if (error) { console.error('Error fetching schedule:', error); return []; }
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error('Error fetching schedule:', error);
+        return [];
+    }
     return data || [];
 }
 
-export async function saveScheduleEvent(event: {
+export async function saveScheduleEvent(supabase: SupabaseClient, event: {
     user_id: string;
     date: string;
     title: string;
@@ -260,7 +283,7 @@ export async function saveScheduleEvent(event: {
     };
 }
 
-export async function deleteScheduleEvent(eventId: string): Promise<{ error: Error | null }> {
+export async function deleteScheduleEvent(supabase: SupabaseClient, eventId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase
         .from('schedule_events')
         .delete()
@@ -270,7 +293,7 @@ export async function deleteScheduleEvent(eventId: string): Promise<{ error: Err
 }
 
 // ===== TOPIC PROGRESS =====
-export async function markTopicComplete(userId: string, topicId: string): Promise<{ error: Error | null }> {
+export async function markTopicComplete(supabase: SupabaseClient, userId: string, topicId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase
         .from('user_topic_progress')
         .upsert({
@@ -283,7 +306,7 @@ export async function markTopicComplete(userId: string, topicId: string): Promis
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function markTopicIncomplete(userId: string, topicId: string): Promise<{ error: Error | null }> {
+export async function markTopicIncomplete(supabase: SupabaseClient, userId: string, topicId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase
         .from('user_topic_progress')
         .delete()
@@ -294,7 +317,7 @@ export async function markTopicIncomplete(userId: string, topicId: string): Prom
 }
 
 // ===== ADMIN =====
-export async function adminSaveCourse(course: {
+export async function adminSaveCourse(supabase: SupabaseClient, course: {
     id: string;
     name: string;
     icon: string;
@@ -308,12 +331,12 @@ export async function adminSaveCourse(course: {
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminDeleteCourse(courseId: string): Promise<{ error: Error | null }> {
+export async function adminDeleteCourse(supabase: SupabaseClient, courseId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('courses').delete().eq('id', courseId);
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminSaveModule(module: {
+export async function adminSaveModule(supabase: SupabaseClient, module: {
     id: string;
     course_id: string;
     name: string;
@@ -323,12 +346,12 @@ export async function adminSaveModule(module: {
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminDeleteModule(moduleId: string): Promise<{ error: Error | null }> {
+export async function adminDeleteModule(supabase: SupabaseClient, moduleId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('modules').delete().eq('id', moduleId);
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminSaveTopic(topic: {
+export async function adminSaveTopic(supabase: SupabaseClient, topic: {
     id: string;
     module_id: string;
     name: string;
@@ -340,12 +363,12 @@ export async function adminSaveTopic(topic: {
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminDeleteTopic(topicId: string): Promise<{ error: Error | null }> {
+export async function adminDeleteTopic(supabase: SupabaseClient, topicId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('topics').delete().eq('id', topicId);
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminSaveQuestion(question: {
+export async function adminSaveQuestion(supabase: SupabaseClient, question: {
     id: string;
     subject: string;
     topic: string;
@@ -363,14 +386,14 @@ export async function adminSaveQuestion(question: {
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminDeleteQuestion(questionId: string): Promise<{ error: Error | null }> {
+export async function adminDeleteQuestion(supabase: SupabaseClient, questionId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('questions').delete().eq('id', questionId);
     return { error: error ? new Error(error.message) : null };
 }
 
 // ===== FILE UPLOADS =====
 
-export async function adminUploadCourseContent(file: File, courseId: string, topicId: string): Promise<{ url: string | null; error: Error | null }> {
+export async function adminUploadCourseContent(supabase: SupabaseClient, file: File, courseId: string, topicId: string): Promise<{ url: string | null; error: Error | null }> {
     const ext = file.name.split('.').pop();
     const path = `${courseId}/${topicId}-${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('course-content').upload(path, file, { upsert: true });
@@ -379,7 +402,7 @@ export async function adminUploadCourseContent(file: File, courseId: string, top
     return { url: data.publicUrl, error: null };
 }
 
-export async function adminUploadQuestionImage(file: File, questionId: string): Promise<{ url: string | null; error: Error | null }> {
+export async function adminUploadQuestionImage(supabase: SupabaseClient, file: File, questionId: string): Promise<{ url: string | null; error: Error | null }> {
     const ext = file.name.split('.').pop();
     const path = `${questionId}-${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('question-images').upload(path, file, { upsert: true });
@@ -388,14 +411,18 @@ export async function adminUploadQuestionImage(file: File, questionId: string): 
     return { url: data.publicUrl, error: null };
 }
 
-export async function adminUpdateTopicContent(topicId: string, contentUrl: string | null, contentType: string | null): Promise<{ error: Error | null }> {
+export async function adminUpdateTopicContent(supabase: SupabaseClient, topicId: string, contentUrl: string | null, contentType: string | null): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('topics').update({ content_url: contentUrl, content_type: contentType }).eq('id', topicId);
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function getAllQuestions(): Promise<QuestionRow[]> {
-    const { data, error } = await supabase.from('questions').select('*').order('subject').order('topic');
-    if (error) { console.error('Error fetching all questions:', error); return []; }
+export async function getAllQuestions(supabase: SupabaseClient, signal?: AbortSignal): Promise<QuestionRow[]> {
+    const { data, error } = await supabase.from('questions').select('*').order('subject').order('topic').abortSignal(signal!);
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error('Error fetching all questions:', error);
+        return [];
+    }
     return (data || []).map(q => ({
         ...q,
         options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
@@ -463,12 +490,13 @@ export interface StudentAccessRow {
 }
 
 // ===== SECTIONS =====
-export async function getCourseSections(courseId: string, userId?: string): Promise<CourseSection[]> {
+export async function getCourseSections(supabase: SupabaseClient, courseId: string, userId?: string, signal?: AbortSignal): Promise<CourseSection[]> {
     const { data: sections } = await supabase
         .from('course_sections')
         .select('*, section_module_map(module_id)')
         .eq('course_id', courseId)
-        .order('sort_order');
+        .order('sort_order')
+        .abortSignal(signal!);
 
     if (!sections) return [];
 
@@ -479,7 +507,8 @@ export async function getCourseSections(courseId: string, userId?: string): Prom
             .select('section_id')
             .eq('user_id', userId)
             .eq('status', 'active')
-            .in('section_id', sections.map(s => s.id));
+            .in('section_id', sections.map(s => s.id))
+            .abortSignal(signal!);
 
         // Also check free_grant
         const { data: grants } = await supabase
@@ -487,7 +516,8 @@ export async function getCourseSections(courseId: string, userId?: string): Prom
             .select('section_id')
             .eq('user_id', userId)
             .eq('status', 'free_grant')
-            .in('section_id', sections.map(s => s.id));
+            .in('section_id', sections.map(s => s.id))
+            .abortSignal(signal!);
 
         (access || []).forEach(a => unlockedSectionIds.add(a.section_id));
         (grants || []).forEach(a => unlockedSectionIds.add(a.section_id));
@@ -506,7 +536,7 @@ export async function getCourseSections(courseId: string, userId?: string): Prom
     }));
 }
 
-export async function adminSaveSection(section: {
+export async function adminSaveSection(supabase: SupabaseClient, section: {
     id?: string;
     course_id: string;
     name: string;
@@ -525,12 +555,12 @@ export async function adminSaveSection(section: {
     return { id: data?.id ?? null, error: error ? new Error(error.message) : null };
 }
 
-export async function adminDeleteSection(sectionId: string): Promise<{ error: Error | null }> {
+export async function adminDeleteSection(supabase: SupabaseClient, sectionId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('course_sections').delete().eq('id', sectionId);
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminAssignModulesToSection(sectionId: string, moduleIds: string[]): Promise<{ error: Error | null }> {
+export async function adminAssignModulesToSection(supabase: SupabaseClient, sectionId: string, moduleIds: string[]): Promise<{ error: Error | null }> {
     // Delete existing mappings then re-insert
     await supabase.from('section_module_map').delete().eq('section_id', sectionId);
     if (moduleIds.length === 0) return { error: null };
@@ -539,7 +569,7 @@ export async function adminAssignModulesToSection(sectionId: string, moduleIds: 
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminUpdateCoursePaymentSettings(courseId: string, settings: {
+export async function adminUpdateCoursePaymentSettings(supabase: SupabaseClient, courseId: string, settings: {
     expiry_date?: string | null;
     is_installment?: boolean;
 }): Promise<{ error: Error | null }> {
@@ -548,16 +578,21 @@ export async function adminUpdateCoursePaymentSettings(courseId: string, setting
 }
 
 // ===== STUDENT ACCESS (admin) =====
-export async function adminGetAllStudentAccess(): Promise<StudentAccessRow[]> {
+export async function adminGetAllStudentAccess(supabase: SupabaseClient, signal?: AbortSignal): Promise<StudentAccessRow[]> {
     const { data, error } = await supabase
         .from('student_section_access')
         .select(`
             *,
             course_sections!inner(name, courses!inner(name))
         `)
-        .order('granted_at', { ascending: false });
+        .order('granted_at', { ascending: false })
+        .abortSignal(signal!);
 
-    if (error) { console.error(error); return []; }
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error(error);
+        return [];
+    }
 
     return (data || []).map(row => ({
         ...row,
@@ -568,7 +603,7 @@ export async function adminGetAllStudentAccess(): Promise<StudentAccessRow[]> {
     }));
 }
 
-export async function adminGrantAccess(userId: string, sectionId: string, notes?: string): Promise<{ error: Error | null }> {
+export async function adminGrantAccess(supabase: SupabaseClient, userId: string, sectionId: string, notes?: string): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('student_section_access').upsert({
         user_id: userId,
         section_id: sectionId,
@@ -579,7 +614,7 @@ export async function adminGrantAccess(userId: string, sectionId: string, notes?
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminRevokeAccess(userId: string, sectionId: string): Promise<{ error: Error | null }> {
+export async function adminRevokeAccess(supabase: SupabaseClient, userId: string, sectionId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('student_section_access')
         .update({ status: 'refunded' })
         .eq('user_id', userId)
@@ -588,13 +623,18 @@ export async function adminRevokeAccess(userId: string, sectionId: string): Prom
 }
 
 // ===== PAYMENTS (finance) =====
-export async function adminGetAllPayments(): Promise<PaymentRow[]> {
+export async function adminGetAllPayments(supabase: SupabaseClient, signal?: AbortSignal): Promise<PaymentRow[]> {
     const { data, error } = await supabase
         .from('payments')
         .select(`*, course_sections(name, courses(name))`)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal!);
 
-    if (error) { console.error(error); return []; }
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error(error);
+        return [];
+    }
     return (data || []).map(row => ({
         ...row,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -604,7 +644,7 @@ export async function adminGetAllPayments(): Promise<PaymentRow[]> {
     }));
 }
 
-export async function createPaymentRecord(payment: {
+export async function createPaymentRecord(supabase: SupabaseClient, payment: {
     user_id: string;
     section_id: string;
     amount: number;
@@ -620,7 +660,7 @@ export async function createPaymentRecord(payment: {
     return { id: data?.id ?? null, error: error ? new Error(error.message) : null };
 }
 
-export async function updatePaymentStatus(paymentId: string, status: 'paid' | 'failed' | 'refunded', sectionId?: string, userId?: string): Promise<{ error: Error | null }> {
+export async function updatePaymentStatus(supabase: SupabaseClient, paymentId: string, status: 'paid' | 'failed' | 'refunded', sectionId?: string, userId?: string): Promise<{ error: Error | null }> {
     const updates: Record<string, unknown> = { status };
     if (status === 'paid') updates.paid_at = new Date().toISOString();
     if (status === 'refunded') updates.refunded_at = new Date().toISOString();
@@ -649,28 +689,33 @@ export async function updatePaymentStatus(paymentId: string, status: 'paid' | 'f
 }
 
 // ===== COUPONS =====
-export async function adminGetCoupons(): Promise<CouponRow[]> {
-    const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
-    if (error) { console.error(error); return []; }
+export async function adminGetCoupons(supabase: SupabaseClient, signal?: AbortSignal): Promise<CouponRow[]> {
+    const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false }).abortSignal(signal!);
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error(error);
+        return [];
+    }
     return data || [];
 }
 
-export async function adminSaveCoupon(coupon: Omit<CouponRow, 'id' | 'uses_count'>): Promise<{ error: Error | null }> {
+export async function adminSaveCoupon(supabase: SupabaseClient, coupon: Omit<CouponRow, 'id' | 'uses_count'>): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('coupons').insert({ ...coupon, uses_count: 0 });
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminToggleCoupon(couponId: string, isActive: boolean): Promise<{ error: Error | null }> {
+export async function adminToggleCoupon(supabase: SupabaseClient, couponId: string, isActive: boolean): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('coupons').update({ is_active: isActive }).eq('id', couponId);
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function validateCoupon(code: string, price: number): Promise<{ valid: boolean; discount: number; coupon: CouponRow | null; message: string }> {
+export async function validateCoupon(supabase: SupabaseClient, code: string, price: number, signal?: AbortSignal): Promise<{ valid: boolean; discount: number; coupon: CouponRow | null; message: string }> {
     const { data, error } = await supabase
         .from('coupons')
         .select('*')
         .eq('code', code.toUpperCase())
         .eq('is_active', true)
+        .abortSignal(signal!)
         .single();
 
     if (error || !data) return { valid: false, discount: 0, coupon: null, message: 'Invalid coupon code' };
@@ -735,14 +780,14 @@ export interface StudentSummary {
     studyStreak: number;
 }
 
-export async function adminGetPlatformStats(): Promise<PlatformStats> {
+export async function adminGetPlatformStats(supabase: SupabaseClient, signal?: AbortSignal): Promise<PlatformStats> {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     const [profilesRes, testsRes, recentUsersRes, progressRes] = await Promise.all([
-        supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('test_results').select('score, max_score, correct, total_questions'),
-        supabase.from('test_results').select('user_id').gte('created_at', sevenDaysAgo),
-        supabase.from('user_topic_progress').select('id', { count: 'exact', head: true }).eq('completed', true),
+        supabase.from('profiles').select('id', { count: 'exact', head: true }).abortSignal(signal!),
+        supabase.from('test_results').select('score, max_score, correct, total_questions').abortSignal(signal!),
+        supabase.from('test_results').select('user_id').gte('created_at', sevenDaysAgo).abortSignal(signal!),
+        supabase.from('user_topic_progress').select('id', { count: 'exact', head: true }).eq('completed', true).abortSignal(signal!),
     ]);
 
     const tests = testsRes.data || [];
@@ -766,10 +811,11 @@ export async function adminGetPlatformStats(): Promise<PlatformStats> {
     };
 }
 
-export async function adminGetSubjectPerformance(): Promise<SubjectPerformance[]> {
+export async function adminGetSubjectPerformance(supabase: SupabaseClient, signal?: AbortSignal): Promise<SubjectPerformance[]> {
     const { data } = await supabase
         .from('test_results')
-        .select('subjects, score, max_score, correct, total_questions');
+        .select('subjects, score, max_score, correct, total_questions')
+        .abortSignal(signal!);
 
     if (!data || data.length === 0) return [];
 
@@ -796,11 +842,12 @@ export async function adminGetSubjectPerformance(): Promise<SubjectPerformance[]
     })).sort((a, b) => b.totalAttempts - a.totalAttempts);
 }
 
-export async function adminGetQuestionAnalytics(limit = 30, sortBy: 'hardest' | 'easiest' | 'mostAttempted' = 'hardest'): Promise<QuestionAnalytics[]> {
+export async function adminGetQuestionAnalytics(supabase: SupabaseClient, limit = 30, sortBy: 'hardest' | 'easiest' | 'mostAttempted' = 'hardest', signal?: AbortSignal): Promise<QuestionAnalytics[]> {
     // Get all test answers with question info
     const { data } = await supabase
         .from('test_answers')
-        .select('question_id, is_correct, questions!inner(id, subject, topic, difficulty, stem)');
+        .select('question_id, is_correct, questions!inner(id, subject, topic, difficulty, stem)')
+        .abortSignal(signal!);
 
     if (!data || data.length === 0) return [];
 
@@ -833,18 +880,20 @@ export async function adminGetQuestionAnalytics(limit = 30, sortBy: 'hardest' | 
     return results.slice(0, limit);
 }
 
-export async function adminGetStudentRoster(): Promise<StudentSummary[]> {
+export async function adminGetStudentRoster(supabase: SupabaseClient, signal?: AbortSignal): Promise<StudentSummary[]> {
     const { data: profiles } = await supabase
         .from('profiles')
         .select('id, email, first_name, last_name, study_streak')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal!);
 
     if (!profiles || profiles.length === 0) return [];
 
     const { data: tests } = await supabase
         .from('test_results')
         .select('user_id, score, max_score, correct, total_questions, created_at')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal!);
 
     const testsByUser: Record<string, typeof tests> = {};
     for (const t of (tests || [])) {
@@ -888,14 +937,19 @@ export interface StudentPaymentRow {
     course_name?: string;
 }
 
-export async function getStudentPayments(userId: string): Promise<StudentPaymentRow[]> {
+export async function getStudentPayments(supabase: SupabaseClient, userId: string, signal?: AbortSignal): Promise<StudentPaymentRow[]> {
     const { data, error } = await supabase
         .from('payments')
         .select(`*, course_sections(name, course_id, courses(name))`)
         .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal!);
 
-    if (error) { console.error('Error fetching student payments:', error); return []; }
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error('Error fetching student payments:', error);
+        return [];
+    }
 
     return (data || []).map(row => ({
         id: row.id,
@@ -950,18 +1004,23 @@ export interface TeamMember {
     created_at: string;
 }
 
-export async function adminGetTeamMembers(): Promise<TeamMember[]> {
+export async function adminGetTeamMembers(supabase: SupabaseClient, signal?: AbortSignal): Promise<TeamMember[]> {
     const { data, error } = await supabase
         .from('profiles')
         .select('id, email, first_name, last_name, admin_role, created_at')
         .not('admin_role', 'is', null)
-        .order('created_at');
+        .order('created_at')
+        .abortSignal(signal!);
 
-    if (error) { console.error('Error fetching team:', error); return []; }
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error('Error fetching team:', error);
+        return [];
+    }
     return (data || []) as TeamMember[];
 }
 
-export async function adminSetUserRole(userId: string, role: AdminRole): Promise<{ error: Error | null }> {
+export async function adminSetUserRole(supabase: SupabaseClient, userId: string, role: AdminRole): Promise<{ error: Error | null }> {
     const { error } = await supabase
         .from('profiles')
         .update({ admin_role: role, is_admin: true })
@@ -969,7 +1028,7 @@ export async function adminSetUserRole(userId: string, role: AdminRole): Promise
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminRemoveUserRole(userId: string): Promise<{ error: Error | null }> {
+export async function adminRemoveUserRole(supabase: SupabaseClient, userId: string): Promise<{ error: Error | null }> {
     const { error } = await supabase
         .from('profiles')
         .update({ admin_role: null, is_admin: false })
@@ -977,11 +1036,12 @@ export async function adminRemoveUserRole(userId: string): Promise<{ error: Erro
     return { error: error ? new Error(error.message) : null };
 }
 
-export async function adminFindUserByEmail(email: string): Promise<{ id: string; email: string; first_name: string | null; last_name: string | null } | null> {
+export async function adminFindUserByEmail(supabase: SupabaseClient, email: string, signal?: AbortSignal): Promise<{ id: string; email: string; first_name: string | null; last_name: string | null } | null> {
     const { data, error } = await supabase
         .from('profiles')
         .select('id, email, first_name, last_name')
         .ilike('email', email.trim())
+        .abortSignal(signal!)
         .single();
 
     if (error || !data) return null;

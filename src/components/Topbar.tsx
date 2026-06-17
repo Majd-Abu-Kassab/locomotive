@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Search, Bell, User, ChevronDown, LogOut, Settings, BookOpen, HelpCircle, X, Menu } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourses, CourseWithModules } from '@/lib/api';
 import './Topbar.css';
 
@@ -21,6 +23,8 @@ interface TopbarProps {
 
 export default function Topbar({ onMenuToggle }: TopbarProps) {
     const { profile, user, signOut } = useAuth();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const [searchQuery, setSearchQuery] = useState('');
     const [showDropdown, setShowDropdown] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
@@ -44,8 +48,13 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
 
     // Load searchable data once
     useEffect(() => {
-        getCourses().then(setAllData);
-    }, []);
+        const signal = getSignal();
+        getCourses(supabase, undefined, signal)
+            .then(setAllData)
+            .catch(err => {
+                if (!isAbortError(err)) console.error('Topbar search load error:', err);
+            });
+    }, [supabase, getSignal]);
 
     // Close search on click outside
     useEffect(() => {

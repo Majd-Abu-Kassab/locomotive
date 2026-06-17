@@ -5,12 +5,16 @@ import AppLayout from '@/components/AppLayout';
 import { useRouter } from 'next/navigation';
 import { Clock, Infinity, Check, ArrowRight, Loader2, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourses, getQuestions, CourseWithModules } from '@/lib/api';
 import './create-test.css';
 
 export default function CreateTestPage() {
     const router = useRouter();
     const { profile } = useAuth();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const isPaidPlan = profile?.plan && profile.plan !== 'free-trial';
     const [mode, setMode] = useState<'timed' | 'untimed'>('timed');
     const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
@@ -22,13 +26,20 @@ export default function CreateTestPage() {
     const [starting, setStarting] = useState(false);
 
     useEffect(() => {
+        const signal = getSignal();
         async function load() {
-            const data = await getCourses();
-            setCourses(data);
-            setLoading(false);
+            try {
+                const data = await getCourses(supabase, undefined, signal);
+                setCourses(data);
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error fetching courses:', err);
+            } finally {
+                setLoading(false);
+            }
         }
         load();
-    }, []);
+    }, [supabase, getSignal]);
 
     const toggleSubject = (name: string) => {
         setSelectedSubjects(prev =>
@@ -40,26 +51,32 @@ export default function CreateTestPage() {
         setStarting(true);
         // Fetch questions matching filters
         const subjectNames = selectedSubjects.length > 0 ? selectedSubjects : undefined;
-        const questions = await getQuestions({
-            subjects: subjectNames,
-            difficulty: difficulty,
-            source: source,
-            limit: questionCount * 2, // Overfetch slightly to allow client-side filtering if needed
-        });
+        try {
+            const questions = await getQuestions(supabase, {
+                subjects: subjectNames,
+                difficulty: difficulty,
+                source: source,
+                limit: questionCount * 2, // Overfetch slightly to allow client-side filtering if needed
+            });
 
-        // Filter out premium questions if user is on free plan
-        let finalQuestions = questions;
-        if (!isPaidPlan) {
-            finalQuestions = finalQuestions.filter(q => q.source !== 'locomotive-original');
+            // Filter out premium questions if user is on free plan
+            let finalQuestions = questions;
+            if (!isPaidPlan) {
+                finalQuestions = finalQuestions.filter(q => q.source !== 'locomotive-original');
+            }
+            
+            finalQuestions = finalQuestions.slice(0, questionCount);
+
+            // Store questions in sessionStorage for the test page
+            sessionStorage.setItem('test_questions', JSON.stringify(finalQuestions));
+            sessionStorage.setItem('test_mode', mode);
+            sessionStorage.setItem('test_name', `Custom Test - ${selectedSubjects.length > 0 ? selectedSubjects.join(', ') : 'All Subjects'}`);
+            router.push('/test/custom');
+        } catch (err) {
+            console.error('Error starting test:', err);
+        } finally {
+            setStarting(false);
         }
-        
-        finalQuestions = finalQuestions.slice(0, questionCount);
-
-        // Store questions in sessionStorage for the test page
-        sessionStorage.setItem('test_questions', JSON.stringify(finalQuestions));
-        sessionStorage.setItem('test_mode', mode);
-        sessionStorage.setItem('test_name', `Custom Test - ${selectedSubjects.length > 0 ? selectedSubjects.join(', ') : 'All Subjects'}`);
-        router.push('/test/custom');
     };
 
     if (loading) {

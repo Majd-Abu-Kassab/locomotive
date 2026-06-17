@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { ChevronLeft, ChevronRight, Plus, Calendar as CalIcon, X, Loader2, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getScheduleEvents, saveScheduleEvent, deleteScheduleEvent, ScheduleEventRow } from '@/lib/api';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -11,6 +13,8 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 
 export default function SchedulePage() {
     const { user } = useAuth();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -22,15 +26,22 @@ export default function SchedulePage() {
     const [savingEvent, setSavingEvent] = useState(false);
 
     useEffect(() => {
+        const signal = getSignal();
         async function load() {
-            if (user) {
-                const data = await getScheduleEvents(user.id);
-                setEvents(data);
+            try {
+                if (user) {
+                    const data = await getScheduleEvents(supabase, user.id, signal);
+                    setEvents(data);
+                }
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error fetching schedule events:', err);
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         }
         load();
-    }, [user]);
+    }, [user, supabase, getSignal]);
 
     const getDaysInMonth = (month: number, year: number) => new Date(year, month + 1, 0).getDate();
     const getFirstDayOfMonth = (month: number, year: number) => new Date(year, month, 1).getDay();
@@ -57,7 +68,7 @@ export default function SchedulePage() {
         if (!user || selectedDay === null || !newEvent.title.trim()) return;
         setSavingEvent(true);
         const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')}`;
-        const { id } = await saveScheduleEvent({
+        const { id } = await saveScheduleEvent(supabase, {
             user_id: user.id,
             date: dateStr,
             title: newEvent.title,
@@ -73,7 +84,7 @@ export default function SchedulePage() {
     };
 
     const handleDeleteEvent = async (eventId: string) => {
-        await deleteScheduleEvent(eventId);
+        await deleteScheduleEvent(supabase, eventId);
         setEvents(prev => prev.filter(e => e.id !== eventId));
     };
 

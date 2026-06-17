@@ -12,6 +12,8 @@ import {
 import { RichTextToolbar, RichTextPreview } from '@/components/RichTextEditor';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { isAbortError } from '@/hooks/useAbortController';
 import {
     getCourses, getAllQuestions,
     adminSaveCourse, adminDeleteCourse,
@@ -34,6 +36,8 @@ type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'anal
 export default function AdminPage() {
     const { profile } = useAuth();
     const { addToast } = useToast();
+    const supabase = useSupabase();
+
     const [tab, setTab] = useState<Tab>('courses');
     const [loading, setLoading] = useState(true);
 
@@ -41,7 +45,7 @@ export default function AdminPage() {
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [editingCourse, setEditingCourse] = useState<Partial<CourseWithModules> | null>(null);
     const [savingCourse, setSavingCourse] = useState(false);
-    
+
     // Modules/Topics state
     const [managingCourseStructure, setManagingCourseStructure] = useState<string | null>(null);
     const [editingModule, setEditingModule] = useState<Partial<ModuleWithTopics> | null>(null);
@@ -112,66 +116,104 @@ export default function AdminPage() {
         if (allowedTabs.length > 0 && !canSeeTab(tab)) {
             setTab(allowedTabs[0] as Tab);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [userRole]);
 
     useEffect(() => {
+        const controller = new AbortController();
         async function load() {
-            const [c, q] = await Promise.all([getCourses(), getAllQuestions()]);
-            setCourses(c);
-            setQuestions(q);
-            setLoading(false);
+            try {
+                const [c, q] = await Promise.all([
+                    getCourses(supabase, undefined, controller.signal),
+                    getAllQuestions(supabase, controller.signal)
+                ]);
+                setCourses(c);
+                setQuestions(q);
+                setLoading(false);
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Admin init load error:', err);
+            }
         }
         load();
-    }, []);
+        return () => controller.abort('AbortError');
+    }, [supabase]);
 
     // Load sections when course changes
     useEffect(() => {
-        if (selectedCourseId) {
-            getCourseSections(selectedCourseId).then(setSections);
-            const course = courses.find(c => c.id === selectedCourseId) as (CourseWithModules & { expiry_date?: string; is_installment?: boolean }) | undefined;
-            if (course) {
-                setCourseExpiry((course.expiry_date as string | undefined) || '');
-                setCourseInstallment((course.is_installment as boolean | undefined) || false);
+        if (!selectedCourseId) return;
+        const controller = new AbortController();
+        async function loadSections() {
+            try {
+                const sects = await getCourseSections(supabase, selectedCourseId, undefined, controller.signal);
+                setSections(sects);
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Load sections error:', err);
             }
         }
-    }, [selectedCourseId, courses]);
+        loadSections();
+        const course = courses.find(c => c.id === selectedCourseId) as (CourseWithModules & { expiry_date?: string; is_installment?: boolean }) | undefined;
+        if (course) {
+            setCourseExpiry((course.expiry_date as string | undefined) || '');
+            setCourseInstallment((course.is_installment as boolean | undefined) || false);
+        }
+        return () => controller.abort('AbortError');
+    }, [selectedCourseId, courses, supabase]);
 
     // Load students and finance data on tab switch
     useEffect(() => {
-        if (tab === 'students') {
-            adminGetAllStudentAccess().then(setStudentAccess);
-            Promise.all(
-                courses.map(c =>
-                    getCourseSections(c.id).then(sects =>
-                        sects.map(s => ({ ...s, courseName: c.name }))
-                    )
-                )
-            ).then(results => setAllSections(results.flat()));
-        }
-        if (tab === 'finance') {
-            adminGetAllPayments().then(setPayments);
-            adminGetCoupons().then(setCoupons);
-        }
-        if (tab === 'analytics') {
-            setAnalyticsLoading(true);
-            Promise.all([
-                adminGetPlatformStats(),
-                adminGetSubjectPerformance(),
-                adminGetQuestionAnalytics(30, qSortBy),
-                adminGetStudentRoster(),
-            ]).then(([stats, subj, qana, roster]) => {
-                setPlatformStats(stats);
-                setSubjectPerf(subj);
-                setQuestionAnalytics(qana);
-                setStudentRoster(roster);
+        const controller = new AbortController();
+        const signal = controller.signal;
+        async function loadTabData() {
+            try {
+                if (tab === 'students') {
+                    const access = await adminGetAllStudentAccess(supabase, signal);
+                    setStudentAccess(access);
+                    const results = await Promise.all(
+                        courses.map(c =>
+                            getCourseSections(supabase, c.id, undefined, signal).then(sects =>
+                                sects.map(s => ({ ...s, courseName: c.name }))
+                            )
+                        )
+                    );
+                    setAllSections(results.flat());
+                }
+                if (tab === 'finance') {
+                    const [p, c] = await Promise.all([
+                        adminGetAllPayments(supabase, signal),
+                        adminGetCoupons(supabase, signal),
+                    ]);
+                    setPayments(p);
+                    setCoupons(c);
+                }
+                if (tab === 'analytics') {
+                    setAnalyticsLoading(true);
+                    const [stats, subj, qana, roster] = await Promise.all([
+                        adminGetPlatformStats(supabase, signal),
+                        adminGetSubjectPerformance(supabase, signal),
+                        adminGetQuestionAnalytics(supabase, 30, qSortBy, signal),
+                        adminGetStudentRoster(supabase, signal),
+                    ]);
+                    setPlatformStats(stats);
+                    setSubjectPerf(subj);
+                    setQuestionAnalytics(qana);
+                    setStudentRoster(roster);
+                    setAnalyticsLoading(false);
+                }
+                if (tab === 'team') {
+                    const members = await adminGetTeamMembers(supabase, signal);
+                    setTeamMembers(members);
+                }
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Tab data load error:', err);
                 setAnalyticsLoading(false);
-            });
+            }
         }
-        if (tab === 'team') {
-            adminGetTeamMembers().then(setTeamMembers);
-        }
-    }, [tab, courses, qSortBy]);
+        loadTabData();
+        return () => controller.abort('AbortError');
+    }, [tab, courses, qSortBy, supabase]);
 
     if (!profile?.admin_role) {
         return (
@@ -189,7 +231,7 @@ export default function AdminPage() {
     const handleSaveCourse = async () => {
         if (!editingCourse || !editingCourse.id || !editingCourse.name) return;
         setSavingCourse(true);
-        const { error } = await adminSaveCourse({
+        const { error } = await adminSaveCourse(supabase, {
             id: editingCourse.id,
             name: editingCourse.name,
             icon: editingCourse.icon || '📚',
@@ -201,7 +243,7 @@ export default function AdminPage() {
         });
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Course saved!', 'success');
-            setCourses(await getCourses());
+            setCourses(await getCourses(supabase));
             setEditingCourse(null);
         }
         setSavingCourse(false);
@@ -209,7 +251,7 @@ export default function AdminPage() {
 
     const handleDeleteCourse = async (courseId: string) => {
         if (!confirm('Delete this course and all its data?')) return;
-        const { error } = await adminDeleteCourse(courseId);
+        const { error } = await adminDeleteCourse(supabase, courseId);
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Course deleted', 'success');
             setCourses(prev => prev.filter(c => c.id !== courseId));
@@ -221,7 +263,7 @@ export default function AdminPage() {
         if (!editingModule || !managingCourseStructure || !editingModule.name) return;
         setSavingModule(true);
         const id = editingModule.id || editingModule.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        const { error } = await adminSaveModule({
+        const { error } = await adminSaveModule(supabase, {
             id,
             course_id: managingCourseStructure,
             name: editingModule.name,
@@ -229,7 +271,7 @@ export default function AdminPage() {
         });
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Module saved', 'success');
-            setCourses(await getCourses());
+            setCourses(await getCourses(supabase));
             setEditingModule(null);
         }
         setSavingModule(false);
@@ -237,10 +279,10 @@ export default function AdminPage() {
 
     const handleDeleteModule = async (moduleId: string) => {
         if (!confirm('Delete this module and all its topics?')) return;
-        const { error } = await adminDeleteModule(moduleId);
+        const { error } = await adminDeleteModule(supabase, moduleId);
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Module deleted', 'success');
-            setCourses(await getCourses());
+            setCourses(await getCourses(supabase));
         }
     };
 
@@ -249,7 +291,7 @@ export default function AdminPage() {
         if (!editingTopic || !editingTopic.module_id || !editingTopic.name) return;
         setSavingTopic(true);
         const id = editingTopic.id || editingTopic.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        const { error } = await adminSaveTopic({
+        const { error } = await adminSaveTopic(supabase, {
             id,
             module_id: editingTopic.module_id,
             name: editingTopic.name,
@@ -259,7 +301,7 @@ export default function AdminPage() {
         });
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Topic saved', 'success');
-            setCourses(await getCourses());
+            setCourses(await getCourses(supabase));
             setEditingTopic(null);
         }
         setSavingTopic(false);
@@ -267,10 +309,10 @@ export default function AdminPage() {
 
     const handleDeleteTopic = async (topicId: string) => {
         if (!confirm('Delete this topic?')) return;
-        const { error } = await adminDeleteTopic(topicId);
+        const { error } = await adminDeleteTopic(supabase, topicId);
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Topic deleted', 'success');
-            setCourses(await getCourses());
+            setCourses(await getCourses(supabase));
         }
     };
 
@@ -278,7 +320,7 @@ export default function AdminPage() {
     const handleSaveQuestion = async () => {
         if (!editingQuestion || !editingQuestion.id || !editingQuestion.stem) return;
         setSavingQuestion(true);
-        const { error } = await adminSaveQuestion({
+        const { error } = await adminSaveQuestion(supabase, {
             id: editingQuestion.id,
             subject: editingQuestion.subject || '',
             topic: editingQuestion.topic || '',
@@ -293,14 +335,14 @@ export default function AdminPage() {
         });
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Question saved!', 'success');
-            setQuestions(await getAllQuestions());
+            setQuestions(await getAllQuestions(supabase));
             setEditingQuestion(null);
         }
         setSavingQuestion(false);
     };
 
     const handleDeleteQuestion = async (qId: string) => {
-        const { error } = await adminDeleteQuestion(qId);
+        const { error } = await adminDeleteQuestion(supabase, qId);
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Question deleted', 'success');
             setQuestions(prev => prev.filter(q => q.id !== qId));
@@ -309,7 +351,7 @@ export default function AdminPage() {
 
     const handleQuestionImageUpload = async (file: File): Promise<string | null> => {
         if (!editingQuestion?.id) { addToast('Save question ID first', 'error'); return null; }
-        const { url, error } = await adminUploadQuestionImage(file, editingQuestion.id);
+        const { url, error } = await adminUploadQuestionImage(supabase, file, editingQuestion.id);
         if (error) { addToast(error.message, 'error'); return null; }
         if (url) setEditingQuestion(prev => prev ? { ...prev, image_url: url } : prev);
         addToast('Image uploaded!', 'success');
@@ -319,17 +361,17 @@ export default function AdminPage() {
     const handleContentUpload = async (file: File) => {
         if (!contentCourseId || !contentTopicId) { addToast('Select course and topic first', 'error'); return; }
         setUploadingContent(true);
-        const { url, error } = await adminUploadCourseContent(file, contentCourseId, contentTopicId);
+        const { url, error } = await adminUploadCourseContent(supabase, file, contentCourseId, contentTopicId);
         if (error) { addToast(error.message, 'error'); setUploadingContent(false); return; }
         if (url) {
             const ext = file.name.split('.').pop()?.toLowerCase();
             const contentType = ext === 'pdf' ? 'pdf' : (ext === 'pptx' || ext === 'ppt') ? 'presentation' : ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext || '') ? 'video' : 'file';
-            const { error: updateErr } = await adminUpdateTopicContent(contentTopicId, url, contentType);
+            const { error: updateErr } = await adminUpdateTopicContent(supabase, contentTopicId, url, contentType);
             if (updateErr) { addToast(updateErr.message, 'error'); }
             else {
                 const label = contentType === 'pdf' ? 'PDF' : contentType === 'video' ? 'Video' : 'Presentation';
                 addToast(`${label} uploaded successfully!`, 'success');
-                setCourses(await getCourses());
+                setCourses(await getCourses(supabase));
             }
         }
         setUploadingContent(false);
@@ -339,7 +381,7 @@ export default function AdminPage() {
     const handleSaveSection = async () => {
         if (!editingSection || !editingSection.name || !selectedCourseId) return;
         setSavingSection(true);
-        const { error } = await adminSaveSection({
+        const { error } = await adminSaveSection(supabase, {
             id: editingSection.id,
             course_id: selectedCourseId,
             name: editingSection.name,
@@ -350,7 +392,7 @@ export default function AdminPage() {
         });
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Section saved!', 'success');
-            setSections(await getCourseSections(selectedCourseId));
+            setSections(await getCourseSections(supabase, selectedCourseId));
             setEditingSection(null);
         }
         setSavingSection(false);
@@ -358,7 +400,7 @@ export default function AdminPage() {
 
     const handleSaveCourseSettings = async () => {
         if (!selectedCourseId) return;
-        const { error } = await adminUpdateCoursePaymentSettings(selectedCourseId, {
+        const { error } = await adminUpdateCoursePaymentSettings(supabase, selectedCourseId, {
             expiry_date: courseExpiry || null,
             is_installment: courseInstallment,
         });
@@ -369,20 +411,21 @@ export default function AdminPage() {
     const handleGrantAccess = async () => {
         if (!grantUserId || !grantSectionId) return;
         setGrantLoading(true);
-        const { error } = await adminGrantAccess(grantUserId, grantSectionId, grantNotes);
+        const { error } = await adminGrantAccess(supabase, grantUserId, grantSectionId, grantNotes);
+
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Access granted!', 'success');
             setGrantUserId(''); setGrantSectionId(''); setGrantNotes('');
-            setStudentAccess(await adminGetAllStudentAccess());
+            setStudentAccess(await adminGetAllStudentAccess(supabase));
         }
         setGrantLoading(false);
     };
 
     const handleRevokeAccess = async (userId: string, sectionId: string) => {
-        const { error } = await adminRevokeAccess(userId, sectionId);
+        const { error } = await adminRevokeAccess(supabase, userId, sectionId);
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Access revoked', 'info');
-            setStudentAccess(await adminGetAllStudentAccess());
+            setStudentAccess(await adminGetAllStudentAccess(supabase));
         }
     };
 
@@ -390,7 +433,7 @@ export default function AdminPage() {
     const handleSaveCoupon = async () => {
         if (!newCoupon.code || !newCoupon.value) return;
         setSavingCoupon(true);
-        const { error } = await adminSaveCoupon({
+        const { error } = await adminSaveCoupon(supabase, {
             code: newCoupon.code.toUpperCase(),
             type: newCoupon.type || 'percentage',
             value: newCoupon.value || 0,
@@ -400,7 +443,7 @@ export default function AdminPage() {
         });
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Coupon created!', 'success');
-            setCoupons(await adminGetCoupons());
+            setCoupons(await adminGetCoupons(supabase));
             setNewCoupon({ type: 'percentage', value: 10, is_active: true });
         }
         setSavingCoupon(false);
@@ -501,7 +544,7 @@ export default function AdminPage() {
                                             <Plus size={14} /> Add Module
                                         </button>
                                     </div>
-                                    
+
                                     {(!course.modules || course.modules.length === 0) ? (
                                         <div className="card" style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--text-tertiary)' }}>
                                             <FolderTree size={32} style={{ margin: '0 auto var(--space-3)' }} />
@@ -509,7 +552,7 @@ export default function AdminPage() {
                                         </div>
                                     ) : (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                                            {course.modules.sort((a,b) => a.sort_order - b.sort_order).map(mod => (
+                                            {course.modules.sort((a, b) => a.sort_order - b.sort_order).map(mod => (
                                                 <div key={mod.id} className="card" style={{ padding: 'var(--space-4)' }}>
                                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-primary)', paddingBottom: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
                                                         <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
@@ -523,12 +566,12 @@ export default function AdminPage() {
                                                             <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={() => handleDeleteModule(mod.id)}><Trash2 size={14} /></button>
                                                         </div>
                                                     </div>
-                                                    
+
                                                     {(!mod.topics || mod.topics.length === 0) ? (
                                                         <p className="text-secondary text-sm" style={{ padding: 'var(--space-2)', textAlign: 'center', fontStyle: 'italic' }}>No topics in this module yet.</p>
                                                     ) : (
                                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                                                            {mod.topics.sort((a,b) => a.sort_order - b.sort_order).map(topic => (
+                                                            {mod.topics.sort((a, b) => a.sort_order - b.sort_order).map(topic => (
                                                                 <div key={topic.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-glass)', padding: 'var(--space-2) var(--space-4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-primary)' }}>
                                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
                                                                         {topic.lesson_type === 'video' ? <Video size={14} style={{ color: '#ef4444' }} /> : topic.lesson_type === 'pdf' ? <FileText size={14} style={{ color: '#3b82f6' }} /> : <FileQuestion size={14} style={{ color: '#10b981' }} />}
@@ -787,10 +830,10 @@ export default function AdminPage() {
                                                             <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
                                                                 <button className="btn btn-ghost btn-sm" onClick={() => setEditingSection(s)}><Edit3 size={14} /></button>
                                                                 <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={async () => {
-                                                                    const { error } = await adminDeleteSection(s.id);
+                                                                    const { error } = await adminDeleteSection(supabase, s.id);
                                                                     if (error) { addToast(error.message, 'error'); } else {
                                                                         addToast('Section deleted', 'success');
-                                                                        setSections(await getCourseSections(selectedCourseId));
+                                                                        setSections(await getCourseSections(supabase, selectedCourseId));
                                                                     }
                                                                 }}><Trash2 size={14} /></button>
                                                             </div>
@@ -984,9 +1027,9 @@ export default function AdminPage() {
                                                     <td><span className={`badge ${c.is_active ? 'badge-success' : 'badge-danger'}`}>{c.is_active ? 'Active' : 'Inactive'}</span></td>
                                                     <td>
                                                         <button className={`btn btn-ghost btn-sm`} onClick={async () => {
-                                                            const { error } = await adminToggleCoupon(c.id, !c.is_active);
+                                                            const { error } = await adminToggleCoupon(supabase, c.id, !c.is_active);
                                                             if (error) { addToast(error.message, 'error'); } else {
-                                                                setCoupons(await adminGetCoupons());
+                                                                setCoupons(await adminGetCoupons(supabase));
                                                             }
                                                         }}>
                                                             {c.is_active ? <XCircle size={14} /> : <CheckCircle size={14} />}
@@ -1079,7 +1122,7 @@ export default function AdminPage() {
                         <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-5)' }} onClick={async () => {
                             await handleSaveSection();
                             if (editingSection.id && editingSection.moduleIds) {
-                                await adminAssignModulesToSection(editingSection.id, editingSection.moduleIds);
+                                await adminAssignModulesToSection(supabase, editingSection.id, editingSection.moduleIds);
                             }
                         }} disabled={savingSection || !editingSection.name}>
                             {savingSection ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : <><Save size={16} /> Save Section</>}
@@ -1111,7 +1154,7 @@ export default function AdminPage() {
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)' }}>
                                 <div className="input-group">
                                     <label>Difficulty</label>
-                                    <select className="select" value={editingQuestion.difficulty || 'medium'} onChange={e => setEditingQuestion({ ...editingQuestion, difficulty: e.target.value as 'easy'|'medium'|'hard' })}>
+                                    <select className="select" value={editingQuestion.difficulty || 'medium'} onChange={e => setEditingQuestion({ ...editingQuestion, difficulty: e.target.value as 'easy' | 'medium' | 'hard' })}>
                                         <option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option>
                                     </select>
                                 </div>
@@ -1372,7 +1415,8 @@ export default function AdminPage() {
                                         placeholder="Enter user's email address"
                                         onKeyDown={e => e.key === 'Enter' && teamEmail.trim() && (async () => {
                                             setTeamSearching(true);
-                                            const r = await adminFindUserByEmail(teamEmail);
+                                            const r = await adminFindUserByEmail(supabase, teamEmail);
+
                                             setTeamSearchResult(r);
                                             setTeamSearching(false);
                                             if (!r) addToast('User not found with that email', 'error');
@@ -1384,7 +1428,8 @@ export default function AdminPage() {
                                     disabled={!teamEmail.trim() || teamSearching}
                                     onClick={async () => {
                                         setTeamSearching(true);
-                                        const r = await adminFindUserByEmail(teamEmail);
+                                        const r = await adminFindUserByEmail(supabase, teamEmail);
+
                                         setTeamSearchResult(r);
                                         setTeamSearching(false);
                                         if (!r) addToast('User not found with that email', 'error');
@@ -1424,13 +1469,15 @@ export default function AdminPage() {
                                             disabled={teamSaving}
                                             onClick={async () => {
                                                 setTeamSaving(true);
-                                                const { error } = await adminSetUserRole(teamSearchResult.id, teamRole);
+                                                const { error } = await adminSetUserRole(supabase, teamSearchResult.id, teamRole);
+
                                                 if (error) { addToast(error.message, 'error'); }
                                                 else {
                                                     addToast(`${ADMIN_ROLE_LABELS[teamRole]} role assigned!`, 'success');
                                                     setTeamEmail('');
                                                     setTeamSearchResult(null);
-                                                    setTeamMembers(await adminGetTeamMembers());
+                                                    setTeamMembers(await adminGetTeamMembers(supabase));
+
                                                 }
                                                 setTeamSaving(false);
                                             }}
@@ -1527,11 +1574,13 @@ export default function AdminPage() {
                                                             style={{ padding: '4px 8px', fontSize: 'var(--fs-xs)', minWidth: 120 }}
                                                             onChange={async (e) => {
                                                                 const newRole = e.target.value as AdminRole;
-                                                                const { error } = await adminSetUserRole(m.id, newRole);
+                                                                const { error } = await adminSetUserRole(supabase, m.id, newRole);
+
                                                                 if (error) { addToast(error.message, 'error'); }
                                                                 else {
                                                                     addToast(`Role updated to ${ADMIN_ROLE_LABELS[newRole]}`, 'success');
-                                                                    setTeamMembers(await adminGetTeamMembers());
+                                                                    setTeamMembers(await adminGetTeamMembers(supabase));
+
                                                                 }
                                                             }}
                                                         >
@@ -1544,11 +1593,11 @@ export default function AdminPage() {
                                                             style={{ color: 'var(--color-danger)' }}
                                                             onClick={async () => {
                                                                 if (!confirm(`Remove admin access for ${m.email}?`)) return;
-                                                                const { error } = await adminRemoveUserRole(m.id);
+                                                                const { error } = await adminRemoveUserRole(supabase, m.id);
                                                                 if (error) { addToast(error.message, 'error'); }
                                                                 else {
                                                                     addToast('Admin access removed', 'info');
-                                                                    setTeamMembers(await adminGetTeamMembers());
+                                                                    setTeamMembers(await adminGetTeamMembers(supabase));
                                                                 }
                                                             }}
                                                         >
@@ -1623,7 +1672,7 @@ export default function AdminPage() {
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
                                 <div className="input-group">
                                     <label>Lesson Type</label>
-                                    <select className="select" value={editingTopic.lesson_type || 'video'} onChange={e => setEditingTopic({ ...editingTopic, lesson_type: e.target.value as 'video'|'pdf'|'quiz' })}>
+                                    <select className="select" value={editingTopic.lesson_type || 'video'} onChange={e => setEditingTopic({ ...editingTopic, lesson_type: e.target.value as 'video' | 'pdf' | 'quiz' })}>
                                         <option value="video">Video</option>
                                         <option value="pdf">PDF</option>
                                         <option value="quiz">Quiz</option>

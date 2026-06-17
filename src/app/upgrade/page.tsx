@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import {
     getCourses, getCourseSections, validateCoupon, createPaymentRecord,
     CourseWithModules, CourseSection,
@@ -37,6 +39,8 @@ function PayPalCheckoutButtons({
     onSuccess: () => void;
     onError: (msg: string) => void;
 }) {
+    const supabase = useSupabase();
+
     return (
         <PayPalScriptProvider
             options={{
@@ -66,7 +70,7 @@ function PayPalCheckoutButtons({
                                 currency,
                                 description,
                                 sectionId,
-                            }),
+                             }),
                         });
                         const data = await res.json();
                         console.log('Create order response:', res.status, data);
@@ -77,7 +81,7 @@ function PayPalCheckoutButtons({
                         }
 
                         // Create pending payment record
-                        await createPaymentRecord({
+                        await createPaymentRecord(supabase, {
                             user_id: userId,
                             section_id: sectionId,
                             amount: finalPrice,
@@ -126,6 +130,8 @@ function PayPalCheckoutButtons({
 function UpgradeContent() {
     const { user } = useAuth();
     const { addToast } = useToast();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
 
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [selectedCourseId, setSelectedCourseId] = useState('');
@@ -141,35 +147,60 @@ function UpgradeContent() {
     const [paymentSuccess, setPaymentSuccess] = useState(false);
 
     useEffect(() => {
-        getCourses(user?.id).then(c => { setCourses(c); setLoading(false); });
-    }, [user]);
+        const signal = getSignal();
+        async function fetchCourses() {
+            try {
+                const c = await getCourses(supabase, user?.id, signal);
+                setCourses(c);
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error fetching courses:', err);
+            } finally {
+                setLoading(false);
+            }
+        }
+        fetchCourses();
+    }, [user, supabase, getSignal]);
 
     useEffect(() => {
-        if (selectedCourseId) {
-            getCourseSections(selectedCourseId, user?.id).then(s => {
+        if (!selectedCourseId) return;
+        const signal = getSignal();
+        async function fetchSections() {
+            try {
+                const s = await getCourseSections(supabase, selectedCourseId, user?.id, signal);
                 setSections(s);
                 setSelectedSection(null);
-            });
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error fetching course sections:', err);
+            }
         }
-    }, [selectedCourseId, user]);
+        fetchSections();
+    }, [selectedCourseId, user, supabase, getSignal]);
 
     const finalPrice = selectedSection ? Math.max(0, selectedSection.price - discount) : 0;
 
     const handleApplyCoupon = async () => {
         if (!couponCode.trim() || !selectedSection) return;
         setCouponLoading(true);
-        const result = await validateCoupon(couponCode, selectedSection.price);
-        setCouponValid(result.valid);
-        setCouponMsg(result.message);
-        if (result.valid) {
-            setDiscount(result.discount);
-            setCouponId(result.coupon?.id || null);
-            addToast(result.message, 'success');
-        } else {
-            setDiscount(0);
-            setCouponId(null);
+        try {
+            const result = await validateCoupon(supabase, couponCode, selectedSection.price);
+            setCouponValid(result.valid);
+            setCouponMsg(result.message);
+            if (result.valid) {
+                setDiscount(result.discount);
+                setCouponId(result.coupon?.id || null);
+                addToast(result.message, 'success');
+            } else {
+                setDiscount(0);
+                setCouponId(null);
+            }
+        } catch (err) {
+            console.error('Error validating coupon:', err);
+            addToast('Error validating coupon', 'error');
+        } finally {
+            setCouponLoading(false);
         }
-        setCouponLoading(false);
     };
 
     const handlePaymentSuccess = () => {

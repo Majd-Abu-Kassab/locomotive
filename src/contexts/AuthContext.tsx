@@ -1,7 +1,7 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, useMemo, ReactNode } from 'react';
-import { createClient } from '@/lib/supabase';
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { useSupabase } from '@/contexts/SupabaseContext';
 import type { User, AuthError } from '@supabase/supabase-js';
 
 export interface Profile {
@@ -46,18 +46,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [profile, setProfile] = useState<Profile | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // Memoize the Supabase client so it's created once and remains stable across renders
-    const supabase = useMemo(() => createClient(), []);
+    const supabase = useSupabase();
 
     const fetchProfile = useCallback(async (userId: string) => {
         const { data, error } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', userId)
-            .single();
+            .maybeSingle();
 
         if (error) {
-            console.error('Error fetching profile:', error);
+            console.error('Error fetching profile details:', error.message, error.code, error.details, JSON.stringify(error));
             return null;
         }
         return data as Profile;

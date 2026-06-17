@@ -9,6 +9,8 @@ import {
     CreditCard, Layers,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourse, getCourseSections, CourseWithModules, CourseSection } from '@/lib/api';
 
 const lessonTypeIcon: Record<string, React.ReactNode> = {
@@ -26,26 +28,35 @@ const lessonTypeLabel: Record<string, string> = {
 export default function CourseDetailPage({ params }: { params: Promise<{ courseId: string }> }) {
     const { courseId } = use(params);
     const { user } = useAuth();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const [course, setCourse] = useState<CourseWithModules | null>(null);
     const [sections, setSections] = useState<CourseSection[]>([]);
     const [loading, setLoading] = useState(true);
     const [expandedModules, setExpandedModules] = useState<string[]>([]);
 
     useEffect(() => {
+        const signal = getSignal();
         async function load() {
-            const [data, sects] = await Promise.all([
-                getCourse(courseId, user?.id),
-                getCourseSections(courseId, user?.id),
-            ]);
-            setCourse(data);
-            setSections(sects);
-            if (data?.modules[0]?.id) {
-                setExpandedModules([data.modules[0].id]);
+            try {
+                const [data, sects] = await Promise.all([
+                    getCourse(supabase, courseId, user?.id, signal),
+                    getCourseSections(supabase, courseId, user?.id, signal),
+                ]);
+                setCourse(data);
+                setSections(sects);
+                if (data?.modules[0]?.id) {
+                    setExpandedModules([data.modules[0].id]);
+                }
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error loading course details:', err);
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         }
         load();
-    }, [courseId, user?.id]);
+    }, [courseId, user?.id, supabase, getSignal]);
 
     if (loading) {
         return (

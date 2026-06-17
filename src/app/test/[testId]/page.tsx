@@ -6,6 +6,8 @@ import {
     Clock, Flag, FlagOff, AlertTriangle, StickyNote, ChevronLeft, ChevronRight, Send, X, Loader2
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { saveTestResult, saveTestAnswers, QuestionRow, getQuestions } from '@/lib/api';
 import './test-sim.css';
 
@@ -16,6 +18,8 @@ type NoteState = { [qIndex: number]: string };
 export default function TestSimulationPage() {
     const router = useRouter();
     const { user } = useAuth();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const [questions, setQuestions] = useState<QuestionRow[]>([]);
     const [testMode, setTestMode] = useState<'timed' | 'untimed'>('timed');
     const [testName, setTestName] = useState('Practice Test');
@@ -52,13 +56,19 @@ export default function TestSimulationPage() {
                 sessionStorage.removeItem('test_name');
             } else {
                 // Fallback: load random questions
-                const data = await getQuestions({ limit: 10 });
-                setQuestions(data);
+                const signal = getSignal();
+                try {
+                    const data = await getQuestions(supabase, { limit: 10 }, signal);
+                    setQuestions(data);
+                } catch (err) {
+                    if (isAbortError(err)) return;
+                    console.error('Error fetching fallback questions:', err);
+                }
             }
             setLoading(false);
         }
         load();
-    }, []);
+    }, [supabase, getSignal]);
 
     // Timer
     useEffect(() => {
@@ -104,29 +114,33 @@ export default function TestSimulationPage() {
 
                 const subjects = [...new Set(questions.map(q => q.subject))];
 
-                const { id: testResultId } = await saveTestResult({
-                    user_id: user.id,
-                    name: testName,
-                    duration: durationStr,
-                    mode: testMode,
-                    total_questions: questions.length,
-                    correct: result.correct,
-                    incorrect: result.incorrect,
-                    unanswered: result.unanswered,
-                    score: result.score,
-                    max_score: result.maxScore,
-                    subjects,
-                    source: 'mixed',
-                });
+                try {
+                    const { id: testResultId } = await saveTestResult(supabase, {
+                        user_id: user.id,
+                        name: testName,
+                        duration: durationStr,
+                        mode: testMode,
+                        total_questions: questions.length,
+                        correct: result.correct,
+                        incorrect: result.incorrect,
+                        unanswered: result.unanswered,
+                        score: result.score,
+                        max_score: result.maxScore,
+                        subjects,
+                        source: 'mixed',
+                    });
 
-                if (testResultId) {
-                    const testAnswers = questions.map((q, i) => ({
-                        test_result_id: testResultId,
-                        question_id: q.id,
-                        selected_answer: answers[i] ?? null,
-                        is_correct: answers[i] !== undefined && answers[i] !== null ? answers[i] === q.correct_answer : null,
-                    }));
-                    await saveTestAnswers(testAnswers);
+                    if (testResultId) {
+                        const testAnswers = questions.map((q, i) => ({
+                            test_result_id: testResultId,
+                            question_id: q.id,
+                            selected_answer: answers[i] ?? null,
+                            is_correct: answers[i] !== undefined && answers[i] !== null ? answers[i] === q.correct_answer : null,
+                        }));
+                        await saveTestAnswers(supabase, testAnswers);
+                    }
+                } catch (err) {
+                    console.error('Error saving test results:', err);
                 }
             }
             setSaving(false);

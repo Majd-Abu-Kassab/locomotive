@@ -8,6 +8,8 @@ import {
     Loader2, Video, HelpCircle, BookOpen, ChevronRight, Download, Clock, Lock
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourse, getCourseSections, getQuestions, markTopicComplete, markTopicIncomplete, CourseWithModules, TopicWithProgress, QuestionRow, CourseSection } from '@/lib/api';
 import { RichTextPreview } from '@/components/RichTextEditor';
 import 'katex/dist/katex.min.css';
@@ -15,6 +17,8 @@ import 'katex/dist/katex.min.css';
 export default function LessonPage({ params }: { params: Promise<{ courseId: string; lessonId: string }> }) {
     const { courseId, lessonId } = use(params);
     const { user } = useAuth();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const [course, setCourse] = useState<CourseWithModules | null>(null);
     const [sections, setSections] = useState<CourseSection[]>([]);
     const [loading, setLoading] = useState(true);
@@ -32,17 +36,24 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
     const [quizAnswers, setQuizAnswers] = useState<Record<number, number | null>>({});
 
     useEffect(() => {
+        const signal = getSignal();
         async function load() {
-            const [data, sects] = await Promise.all([
-                getCourse(courseId, user?.id),
-                getCourseSections(courseId, user?.id),
-            ]);
-            setCourse(data);
-            setSections(sects);
-            setLoading(false);
+            try {
+                const [data, sects] = await Promise.all([
+                    getCourse(supabase, courseId, user?.id, signal),
+                    getCourseSections(supabase, courseId, user?.id, signal),
+                ]);
+                setCourse(data);
+                setSections(sects);
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error loading lesson details:', err);
+            } finally {
+                setLoading(false);
+            }
         }
         load();
-    }, [courseId, user?.id]);
+    }, [courseId, user?.id, supabase, getSignal]);
 
     // Find topic + navigation info
     const { topic, moduleName, moduleId, prevTopic, nextTopic, allTopics } = useMemo(() => {
@@ -93,31 +104,41 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
     const loadQuiz = async () => {
         if (!course) return;
         setQuizLoading(true);
-        const questions = await getQuestions({
-            subjects: [course.name],
-            limit: 5,
-        });
-        setQuizQuestions(questions);
-        setCurrentQuizQ(0);
-        setQuizAnswer(null);
-        setQuizScore({ correct: 0, total: 0 });
-        setQuizFinished(false);
-        setQuizTimer(100);
-        setQuizAnswers({});
-        setQuizLoading(false);
+        try {
+            const questions = await getQuestions(supabase, {
+                subjects: [course.name],
+                limit: 5,
+            });
+            setQuizQuestions(questions);
+            setCurrentQuizQ(0);
+            setQuizAnswer(null);
+            setQuizScore({ correct: 0, total: 0 });
+            setQuizFinished(false);
+            setQuizTimer(100);
+            setQuizAnswers({});
+        } catch (err) {
+            console.error('Error loading quiz questions:', err);
+        } finally {
+            setQuizLoading(false);
+        }
     };
 
     const handleToggleComplete = async () => {
         if (!user || !topic) return;
         setCompleting(true);
-        if (topicCompleted) {
-            await markTopicIncomplete(user.id, topic.id);
-            setTopicCompleted(false);
-        } else {
-            await markTopicComplete(user.id, topic.id);
-            setTopicCompleted(true);
+        try {
+            if (topicCompleted) {
+                await markTopicIncomplete(supabase, user.id, topic.id);
+                setTopicCompleted(false);
+            } else {
+                await markTopicComplete(supabase, user.id, topic.id);
+                setTopicCompleted(true);
+            }
+        } catch (err) {
+            console.error('Error toggling topic completion status:', err);
+        } finally {
+            setCompleting(false);
         }
-        setCompleting(false);
     };
 
     const handleQuizAnswer = (idx: number) => {

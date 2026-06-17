@@ -5,21 +5,32 @@ import AppLayout from '@/components/AppLayout';
 import Link from 'next/link';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourses, CourseWithModules } from '@/lib/api';
 
 export default function CoursesPage() {
     const { user } = useAuth();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        const signal = getSignal();
         async function load() {
-            const data = await getCourses(user?.id);
-            setCourses(data);
-            setLoading(false);
+            try {
+                const data = await getCourses(supabase, user?.id, signal);
+                setCourses(data);
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error fetching courses:', err);
+            } finally {
+                setLoading(false);
+            }
         }
         load();
-    }, [user?.id]);
+    }, [user?.id, supabase, getSignal]);
 
     if (loading) {
         return (

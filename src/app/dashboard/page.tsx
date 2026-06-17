@@ -9,12 +9,16 @@ import {
     Clock, FileText, Zap, Award, Loader2
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { isAbortError } from '@/hooks/useAbortController';
 import { getCourses, getTestResults, CourseWithModules, TestResultRow } from '@/lib/api';
 import './dashboard.css';
 
 export default function DashboardPage() {
     const { profile, user, loading } = useAuth();
     const router = useRouter();
+    const supabase = useSupabase();
+
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [lastTest, setLastTest] = useState<TestResultRow | null>(null);
     const [dataLoading, setDataLoading] = useState(true);
@@ -24,24 +28,28 @@ export default function DashboardPage() {
             router.push('/login');
             return;
         }
+        if (loading) return;
+        const controller = new AbortController();
         async function load() {
             try {
                 if (user) {
                     const [coursesData, testsData] = await Promise.all([
-                        getCourses(user.id),
-                        getTestResults(user.id),
+                        getCourses(supabase, user.id, controller.signal),
+                        getTestResults(supabase, user.id, controller.signal),
                     ]);
                     setCourses(coursesData);
                     if (testsData.length > 0) setLastTest(testsData[0]);
                 }
             } catch (err) {
+                if (isAbortError(err)) return;
                 console.error('Dashboard data load error:', err);
             } finally {
                 setDataLoading(false);
             }
         }
-        if (!loading) load();
-    }, [user, loading]);
+        load();
+        return () => controller.abort('AbortError');
+    }, [user, loading, router, supabase]);
 
     if (loading || dataLoading) {
         return (

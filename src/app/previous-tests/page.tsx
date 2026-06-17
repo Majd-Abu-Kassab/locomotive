@@ -5,23 +5,34 @@ import AppLayout from '@/components/AppLayout';
 import Link from 'next/link';
 import { Clock, FileText, ArrowRight, Calendar, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getTestResults, TestResultRow } from '@/lib/api';
 
 export default function PreviousTestsPage() {
     const { user } = useAuth();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const [tests, setTests] = useState<TestResultRow[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        const signal = getSignal();
         async function load() {
-            if (user) {
-                const data = await getTestResults(user.id);
-                setTests(data);
+            try {
+                if (user) {
+                    const data = await getTestResults(supabase, user.id, signal);
+                    setTests(data);
+                }
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error fetching test results:', err);
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         }
         load();
-    }, [user]);
+    }, [user, supabase, getSignal]);
 
     if (loading) {
         return (

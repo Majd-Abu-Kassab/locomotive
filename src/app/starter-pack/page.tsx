@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourses, getTestResults, CourseWithModules, TestResultRow } from '@/lib/api';
 
 interface StarterItem {
@@ -98,26 +100,33 @@ const starterItems: StarterItem[] = [
 export default function StarterPackPage() {
     const { user } = useAuth();
     const { addToast } = useToast();
+    const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [testsTaken, setTestsTaken] = useState(0);
     const [expandedItem, setExpandedItem] = useState<string | null>('welcome');
     const [completedItems, setCompletedItems] = useState<Set<string>>(new Set());
 
     useEffect(() => {
+        const signal = getSignal();
         async function load() {
-            const c = await getCourses(user?.id);
-            setCourses(c);
-            if (user) {
-                const tests = await getTestResults(user.id);
-                setTestsTaken(tests.length);
+            try {
+                const c = await getCourses(supabase, user?.id, signal);
+                setCourses(c);
+                if (user) {
+                    const tests = await getTestResults(supabase, user.id, signal);
+                    setTestsTaken(tests.length);
+                }
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error loading starter pack data:', err);
             }
-
             // Load completion from localStorage
             const saved = localStorage.getItem('starter_completed');
             if (saved) setCompletedItems(new Set(JSON.parse(saved)));
         }
         load();
-    }, [user]);
+    }, [user, supabase, getSignal]);
 
     const markComplete = (id: string) => {
         const updated = new Set(completedItems);

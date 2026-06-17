@@ -4,10 +4,11 @@ import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { User, Mail, Lock, CreditCard, Save, Loader2, CheckCircle, Target, Calendar, BookOpen } from 'lucide-react';
-import { createClient } from '@/lib/supabase';
+import { useSupabase } from '@/contexts/SupabaseContext';
 
 export default function ProfilePage() {
     const { profile, updateProfile } = useAuth();
+    const supabase = useSupabase();
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [email, setEmail] = useState('');
@@ -82,7 +83,6 @@ export default function ProfilePage() {
             return;
         }
         setPasswordSaving(true);
-        const supabase = createClient();
         const { error } = await supabase.auth.updateUser({ password: newPassword });
         if (error) {
             setPasswordError(error.message);
