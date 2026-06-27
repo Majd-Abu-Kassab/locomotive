@@ -91,6 +91,16 @@ export interface ScheduleEventRow {
     type: 'study' | 'test' | 'dayoff';
     duration: string;
 }
+export interface NotificationRow {
+    id: string;
+    user_id: string;
+    title: string;
+    message: string;
+    type: string;
+    link: string | null;
+    is_read: boolean;
+    created_at: string;
+}
 
 // ===== COURSES =====
 export async function getCourses(supabase: SupabaseClient, userId?: string, signal?: AbortSignal): Promise<CourseWithModules[]> {
@@ -1046,4 +1056,78 @@ export async function adminFindUserByEmail(supabase: SupabaseClient, email: stri
 
     if (error || !data) return null;
     return data;
+}
+
+// ===== NOTIFICATIONS =====
+export async function getNotifications(supabase: SupabaseClient, userId: string, signal?: AbortSignal): Promise<NotificationRow[]> {
+    const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(20)
+        .abortSignal(signal!);
+
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error('Error fetching notifications:', error);
+        return [];
+    }
+    return data || [];
+}
+
+export async function markNotificationAsRead(supabase: SupabaseClient, notificationId: string): Promise<{ error: Error | null }> {
+    const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', notificationId);
+    return { error: error ? new Error(error.message) : null };
+}
+
+export async function markAllNotificationsAsRead(supabase: SupabaseClient, userId: string): Promise<{ error: Error | null }> {
+    const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', userId)
+        .eq('is_read', false);
+    return { error: error ? new Error(error.message) : null };
+}
+
+// ===== NOTIFICATIONS (ADMIN) =====
+export async function adminSendNotification(
+    supabase: SupabaseClient,
+    payload: { title: string; message: string; type: string; link: string; targetUserId: string }
+): Promise<{ error: Error | null }> {
+    try {
+        if (payload.targetUserId === 'all') {
+            // Fetch all users to broadcast
+            const { data: users, error: fetchError } = await supabase.from('profiles').select('id');
+            if (fetchError) return { error: new Error(fetchError.message) };
+            if (!users || users.length === 0) return { error: null };
+
+            const notifications = users.map(u => ({
+                user_id: u.id,
+                title: payload.title,
+                message: payload.message,
+                type: payload.type,
+                link: payload.link || null,
+            }));
+
+            // Insert in batches if large, but Supabase insert handles arrays well up to ~1k-10k.
+            const { error } = await supabase.from('notifications').insert(notifications);
+            return { error: error ? new Error(error.message) : null };
+        } else {
+            // Send to single user
+            const { error } = await supabase.from('notifications').insert({
+                user_id: payload.targetUserId,
+                title: payload.title,
+                message: payload.message,
+                type: payload.type,
+                link: payload.link || null,
+            });
+            return { error: error ? new Error(error.message) : null };
+        }
+    } catch (e: any) {
+        return { error: new Error(e.message) };
+    }
 }

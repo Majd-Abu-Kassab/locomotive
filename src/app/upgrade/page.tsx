@@ -18,24 +18,18 @@ import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import './upgrade.css';
 
 /* ─── PayPal wrapper ─── */
+// Note: price and coupon are now validated SERVER-SIDE.
+// The client only passes sectionId + couponCode; the server resolves the final price.
 function PayPalCheckoutButtons({
-    finalPrice,
-    currency,
-    description,
+    sectionCurrency,
     sectionId,
-    userId,
-    couponId,
-    discount,
+    couponCode,
     onSuccess,
     onError,
 }: {
-    finalPrice: number;
-    currency: string;
-    description: string;
+    sectionCurrency: string;
     sectionId: string;
-    userId: string;
-    couponId: string | null;
-    discount: number;
+    couponCode: string;
     onSuccess: () => void;
     onError: (msg: string) => void;
 }) {
@@ -45,7 +39,7 @@ function PayPalCheckoutButtons({
         <PayPalScriptProvider
             options={{
                 clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '',
-                currency: currency,
+                currency: sectionCurrency,
                 intent: 'capture',
             }}
         >
@@ -60,47 +54,46 @@ function PayPalCheckoutButtons({
                     }}
                     fundingSource={undefined}
                     createOrder={async () => {
-                        console.log('=== Creating PayPal order ===');
-                        console.log('finalPrice:', finalPrice, 'currency:', currency, 'sectionId:', sectionId);
+                        // Server resolves price from sectionId (client cannot manipulate amount)
                         const res = await fetch('/api/paypal/create-order', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                amount: finalPrice,
-                                currency,
-                                description,
                                 sectionId,
-                             }),
+                                currency: sectionCurrency,
+                                couponCode: couponCode || undefined,
+                            }),
                         });
                         const data = await res.json();
-                        console.log('Create order response:', res.status, data);
                         if (!data.orderId) {
                             const errMsg = data.error || data.details?.message || 'Failed to create PayPal order';
                             onError(`PayPal error: ${errMsg} (status ${res.status})`);
                             throw new Error('No orderId: ' + JSON.stringify(data));
                         }
 
-                        // Create pending payment record
+                        // Create pending payment record using server-computed values
                         await createPaymentRecord(supabase, {
-                            user_id: userId,
+                            // user_id will be resolved from session server-side;
+                            // we pass a placeholder here and the capture route will use the verified user
+                            user_id: '',  // filled in by server via session
                             section_id: sectionId,
-                            amount: finalPrice,
-                            currency,
+                            amount: data.finalPrice,
+                            currency: sectionCurrency,
                             paypal_order_id: data.orderId,
-                            coupon_id: couponId,
-                            discount_amount: discount,
+                            coupon_id: data.couponId || null,
+                            discount_amount: data.discountAmount || 0,
                         });
 
                         return data.orderId;
                     }}
                     onApprove={async (data) => {
                         try {
+                            // userId is NOT sent — server uses the authenticated session
                             const captureRes = await fetch('/api/paypal/capture-order', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                     orderId: data.orderID,
-                                    userId,
                                     sectionId,
                                 }),
                             });
@@ -363,13 +356,9 @@ function UpgradeContent() {
                                 {/* PayPal Buttons */}
                                 {user && (
                                     <PayPalCheckoutButtons
-                                        finalPrice={finalPrice}
-                                        currency={selectedSection.currency || 'EUR'}
-                                        description={`${courses.find(c => c.id === selectedCourseId)?.name} — ${selectedSection.name}`}
+                                        sectionCurrency={selectedSection.currency || 'EUR'}
                                         sectionId={selectedSection.id}
-                                        userId={user.id}
-                                        couponId={couponId}
-                                        discount={discount}
+                                        couponCode={couponCode}
                                         onSuccess={handlePaymentSuccess}
                                         onError={handlePaymentError}
                                     />

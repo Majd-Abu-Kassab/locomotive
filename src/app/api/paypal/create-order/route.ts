@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient as createSupabaseServer } from '@/lib/supabase-server';
+import { z } from 'zod';
+import { Ratelimit } from '@upstash/ratelimit';
+import { kv } from '@vercel/kv';
 
 const PAYPAL_BASE = process.env.PAYPAL_MODE === 'live'
     ? 'https://api-m.paypal.com'
@@ -6,6 +10,20 @@ const PAYPAL_BASE = process.env.PAYPAL_MODE === 'live'
 
 const CLIENT_ID = process.env.PAYPAL_CLIENT_ID!;
 const SECRET = process.env.PAYPAL_SECRET!;
+
+const createOrderSchema = z.object({
+    sectionId: z.string().min(1, "sectionId is required"),
+    currency: z.string().optional().default('EUR'),
+    couponCode: z.string().optional()
+});
+
+const ratelimit = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN
+    ? new Ratelimit({
+          redis: kv,
+          limiter: Ratelimit.slidingWindow(5, '10 s'),
+          analytics: true,
+      })
+    : null;
 
 async function getAccessToken(): Promise<string> {
     const res = await fetch(`${PAYPAL_BASE}/v1/oauth2/token`, {
@@ -21,35 +39,85 @@ async function getAccessToken(): Promise<string> {
 }
 
 // POST /api/paypal/create-order
-// Body: { sectionId, amount, currency, description }
+// Body: { sectionId, currency?, couponCode? }
+// Price is resolved SERVER-SIDE from sectionId so the client cannot manipulate it.
 export async function POST(req: NextRequest) {
     try {
-        const body = await req.json();
-        const { amount, currency = 'EUR', description, sectionId } = body;
-
-        console.log('=== PayPal Create Order ===');
-        console.log('Request body:', JSON.stringify(body));
-        console.log('PAYPAL_MODE:', process.env.PAYPAL_MODE);
-        console.log('PAYPAL_BASE:', PAYPAL_BASE);
-        console.log('CLIENT_ID exists:', !!CLIENT_ID);
-        console.log('SECRET exists:', !!SECRET);
-
-        if (!amount || amount <= 0) {
-            console.error('Invalid amount:', amount);
-            return NextResponse.json({ error: 'Invalid amount' }, { status: 400 });
+        // --- Rate Limiting (H2) ---
+        if (ratelimit) {
+            const ip = req.headers.get('x-forwarded-for') ?? 'anonymous';
+            const { success } = await ratelimit.limit(`ratelimit_${ip}`);
+            if (!success) {
+                return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+            }
         }
 
+        // --- Auth: require a logged-in user ---
+        const supabase = await createSupabaseServer();
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // --- Request Validation (M3) ---
+        const rawBody = await req.json();
+        const parsed = createOrderSchema.safeParse(rawBody);
+        
+        if (!parsed.success) {
+            return NextResponse.json({ error: 'Invalid request parameters', details: parsed.error.format() }, { status: 400 });
+        }
+        
+        const { sectionId, currency, couponCode } = parsed.data;
+
         if (!CLIENT_ID || !SECRET) {
-            console.error('Missing PayPal credentials');
             return NextResponse.json({ error: 'PayPal not configured' }, { status: 500 });
         }
 
-        console.log('Getting access token...');
-        const token = await getAccessToken();
-        console.log('Access token obtained:', !!token);
+        // --- Resolve price server-side ---
+        const { data: section, error: sectionErr } = await supabase
+            .from('course_sections')
+            .select('id, name, price, currency, course_id, courses(name)')
+            .eq('id', sectionId)
+            .single();
 
+        if (sectionErr || !section) {
+            return NextResponse.json({ error: 'Section not found' }, { status: 404 });
+        }
+
+        let finalPrice: number = Number(section.price);
+        let couponId: string | null = null;
+        let discountAmount = 0;
+
+        // --- Server-side coupon validation (M2 fix) ---
+        if (couponCode && couponCode.trim()) {
+            const { data: coupon } = await supabase
+                .from('coupons')
+                .select('*')
+                .eq('code', couponCode.trim().toUpperCase())
+                .eq('is_active', true)
+                .single();
+
+            if (coupon) {
+                const expired = coupon.expires_at && new Date(coupon.expires_at) < new Date();
+                const maxedOut = coupon.max_uses !== null && coupon.uses_count >= coupon.max_uses;
+
+                if (!expired && !maxedOut) {
+                    discountAmount = coupon.type === 'percentage'
+                        ? Math.min(finalPrice * (coupon.value / 100), finalPrice)
+                        : Math.min(coupon.value, finalPrice);
+                    discountAmount = Math.round(discountAmount * 100) / 100;
+                    finalPrice = Math.max(0, finalPrice - discountAmount);
+                    couponId = coupon.id;
+                }
+            }
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const courseName = (section as any).courses?.name || 'LOCOMOTIVE Course';
+        const description = `${courseName} — ${section.name}`;
+
+        const token = await getAccessToken();
         if (!token) {
-            console.error('Failed to get PayPal access token');
             return NextResponse.json({ error: 'PayPal authentication failed' }, { status: 500 });
         }
 
@@ -57,17 +125,16 @@ export async function POST(req: NextRequest) {
             intent: 'CAPTURE',
             purchase_units: [{
                 amount: {
-                    currency_code: currency,
-                    value: Number(amount).toFixed(2),
+                    currency_code: section.currency || currency,
+                    value: finalPrice.toFixed(2),
                 },
-                description: description || 'LOCOMOTIVE Course Access',
+                description,
             }],
             application_context: {
                 brand_name: 'LOCOMOTIVE',
                 user_action: 'PAY_NOW',
             },
         };
-        console.log('Order payload:', JSON.stringify(orderPayload));
 
         const order = await fetch(`${PAYPAL_BASE}/v2/checkout/orders`, {
             method: 'POST',
@@ -79,8 +146,6 @@ export async function POST(req: NextRequest) {
         });
 
         const orderData = await order.json();
-        console.log('PayPal response status:', order.status);
-        console.log('PayPal response:', JSON.stringify(orderData));
 
         if (!order.ok) {
             console.error('PayPal create order error:', JSON.stringify(orderData, null, 2));
@@ -92,10 +157,13 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({
             orderId: orderData.id,
+            finalPrice,
+            discountAmount,
+            couponId,
             approvalUrl: orderData.links?.find((l: { rel: string; href: string }) => l.rel === 'approve')?.href,
         });
     } catch (err) {
         console.error('create-order error:', err);
-        return NextResponse.json({ error: 'Internal server error', message: String(err) }, { status: 500 });
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
 }

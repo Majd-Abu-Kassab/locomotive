@@ -13,13 +13,16 @@
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.97.0",
     "@types/katex": "^0.16.8",
+    "@upstash/ratelimit": "^2.0.8",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/kv": "^3.0.0",
     "katex": "^0.16.45",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "recharts": "^3.7.0"
+    "recharts": "^3.7.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20",

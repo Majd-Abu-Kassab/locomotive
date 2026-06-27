@@ -7,7 +7,7 @@ import {
     AlertTriangle, Layers, Users, CreditCard, Tag, CheckCircle, XCircle,
     Gift, BarChart2, TrendingUp, TrendingDown, Activity, Award,
     Upload, FileText, Image as ImageIcon, Shield, UserCog, Search, Crown,
-    ArrowLeft, FolderTree, Video, FileQuestion
+    ArrowLeft, FolderTree, Video, FileQuestion, Bell, Send
 } from 'lucide-react';
 import { RichTextToolbar, RichTextPreview } from '@/components/RichTextEditor';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,10 +28,10 @@ import {
     getCourseSections,
     CourseWithModules, ModuleWithTopics, TopicWithProgress, QuestionRow, CourseSection, PaymentRow, CouponRow, StudentAccessRow,
     PlatformStats, SubjectPerformance, QuestionAnalytics, StudentSummary,
-    AdminRole, ADMIN_ROLE_LABELS, ADMIN_ROLE_DESCRIPTIONS, ROLE_PERMISSIONS, TeamMember,
+    AdminRole, ADMIN_ROLE_LABELS, ADMIN_ROLE_DESCRIPTIONS, ROLE_PERMISSIONS, TeamMember, adminSendNotification
 } from '@/lib/api';
 
-type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics' | 'team';
+type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics' | 'team' | 'notifications';
 
 export default function AdminPage() {
     const { profile } = useAuth();
@@ -105,6 +105,10 @@ export default function AdminPage() {
     const [teamSearchResult, setTeamSearchResult] = useState<{ id: string; email: string; first_name: string | null; last_name: string | null } | null>(null);
     const [teamSearching, setTeamSearching] = useState(false);
     const [teamSaving, setTeamSaving] = useState(false);
+
+    // Notifications tab
+    const [notificationPayload, setNotificationPayload] = useState({ title: '', message: '', type: 'system', link: '', targetUserId: 'all' });
+    const [sendingNotification, setSendingNotification] = useState(false);
 
     // Role-based permissions
     const userRole = profile?.admin_role as AdminRole | null;
@@ -378,10 +382,10 @@ export default function AdminPage() {
     };
 
     // ===== SECTION HANDLERS =====
-    const handleSaveSection = async () => {
+    const handleSaveSection = async (moduleIds?: string[]) => {
         if (!editingSection || !editingSection.name || !selectedCourseId) return;
         setSavingSection(true);
-        const { error } = await adminSaveSection(supabase, {
+        const { id, error } = await adminSaveSection(supabase, {
             id: editingSection.id,
             course_id: selectedCourseId,
             name: editingSection.name,
@@ -390,7 +394,12 @@ export default function AdminPage() {
             currency: editingSection.currency || 'EUR',
             sort_order: editingSection.sort_order || sections.length,
         });
-        if (error) { addToast(error.message, 'error'); } else {
+        
+        if (error) { addToast(error.message, 'error'); } 
+        else {
+            if (id && moduleIds) {
+                await adminAssignModulesToSection(supabase, id, moduleIds);
+            }
             addToast('Section saved!', 'success');
             setSections(await getCourseSections(supabase, selectedCourseId));
             setEditingSection(null);
@@ -447,6 +456,21 @@ export default function AdminPage() {
             setNewCoupon({ type: 'percentage', value: 10, is_active: true });
         }
         setSavingCoupon(false);
+    };
+
+    // ===== NOTIFICATION HANDLER =====
+    const handleSendNotification = async () => {
+        if (!notificationPayload.title || !notificationPayload.message) {
+            addToast('Title and message are required', 'error');
+            return;
+        }
+        setSendingNotification(true);
+        const { error } = await adminSendNotification(supabase, notificationPayload);
+        if (error) { addToast(error.message, 'error'); } else {
+            addToast('Notification sent successfully!', 'success');
+            setNotificationPayload({ title: '', message: '', type: 'system', link: '', targetUserId: 'all' });
+        }
+        setSendingNotification(false);
     };
 
     const filteredQuestions = questionFilter
@@ -518,6 +542,7 @@ export default function AdminPage() {
                         { key: 'finance', label: 'Finance', icon: <CreditCard size={14} /> },
                         { key: 'analytics', label: 'Analytics', icon: <BarChart2 size={14} /> },
                         { key: 'team', label: 'Team', icon: <UserCog size={14} /> },
+                        { key: 'notifications', label: 'Notifications', icon: <Bell size={14} /> },
                     ] as { key: Tab; label: string; icon: React.ReactNode }[]).filter(t => canSeeTab(t.key)).map(t => (
                         <button key={t.key} className={`admin-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
                             <span style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }}>{t.icon}</span>{t.label}
@@ -1120,10 +1145,7 @@ export default function AdminPage() {
                             </div>
                         </div>
                         <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-5)' }} onClick={async () => {
-                            await handleSaveSection();
-                            if (editingSection.id && editingSection.moduleIds) {
-                                await adminAssignModulesToSection(supabase, editingSection.id, editingSection.moduleIds);
-                            }
+                            await handleSaveSection(editingSection.moduleIds);
                         }} disabled={savingSection || !editingSection.name}>
                             {savingSection ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : <><Save size={16} /> Save Section</>}
                         </button>
@@ -1617,6 +1639,57 @@ export default function AdminPage() {
                     )}
                 </div>
             )}
+
+            {/* ===== NOTIFICATIONS TAB ===== */}
+            {tab === 'notifications' && (
+                <div>
+                    <div className="card" style={{ maxWidth: 600, margin: '0 auto' }}>
+                        <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                            <Bell size={18} /> Send Notification
+                        </h3>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                            <div className="input-group">
+                                <label>Target User</label>
+                                <select className="select" value={notificationPayload.targetUserId} onChange={e => setNotificationPayload({ ...notificationPayload, targetUserId: e.target.value })}>
+                                    <option value="all">Broadcast to All Users</option>
+                                    <option value="specific">Specific User (Requires ID setup)</option>
+                                </select>
+                            </div>
+                            {notificationPayload.targetUserId !== 'all' && (
+                                <div className="input-group">
+                                    <label>Specific User ID</label>
+                                    <input className="input" placeholder="Paste user UUID here" value={notificationPayload.targetUserId === 'specific' ? '' : notificationPayload.targetUserId} onChange={e => setNotificationPayload({ ...notificationPayload, targetUserId: e.target.value })} />
+                                </div>
+                            )}
+                            <div className="input-group">
+                                <label>Notification Type</label>
+                                <select className="select" value={notificationPayload.type} onChange={e => setNotificationPayload({ ...notificationPayload, type: e.target.value })}>
+                                    <option value="system">System Announcement</option>
+                                    <option value="course">Course Update</option>
+                                    <option value="payment">Payment Alert</option>
+                                    <option value="promotional">Promotional</option>
+                                </select>
+                            </div>
+                            <div className="input-group">
+                                <label>Title</label>
+                                <input className="input" placeholder="e.g. New Biology Module Released!" value={notificationPayload.title} onChange={e => setNotificationPayload({ ...notificationPayload, title: e.target.value })} />
+                            </div>
+                            <div className="input-group">
+                                <label>Message</label>
+                                <textarea className="input" rows={4} placeholder="Write your notification message here..." value={notificationPayload.message} onChange={e => setNotificationPayload({ ...notificationPayload, message: e.target.value })} />
+                            </div>
+                            <div className="input-group">
+                                <label>Action Link (Optional)</label>
+                                <input className="input" placeholder="e.g. /courses/biology" value={notificationPayload.link} onChange={e => setNotificationPayload({ ...notificationPayload, link: e.target.value })} />
+                            </div>
+                            <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-2)' }} onClick={handleSendNotification} disabled={sendingNotification || !notificationPayload.title || !notificationPayload.message}>
+                                {sendingNotification ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Sending...</> : <><Send size={16} /> Send Notification</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
             {/* ===== MODULE EDIT MODAL ===== */}
             {editingModule && (
                 <div className="modal-overlay" onClick={() => setEditingModule(null)}>

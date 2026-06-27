@@ -145,9 +145,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const updateProfile = async (updates: Partial<Profile>) => {
         if (!user) return { error: new Error('Not authenticated') };
 
+        // H4 security: strip privilege-escalation fields — these can only be
+        // changed by a DB admin via the service role or Supabase dashboard.
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { is_admin: _ia, admin_role: _ar, ...safeUpdates } = updates;
+
         const { error } = await supabase
             .from('profiles')
-            .update(updates)
+            .update(safeUpdates)
             .eq('id', user.id);
 
         if (!error) {

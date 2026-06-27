@@ -6,7 +6,7 @@ import { Search, Bell, User, ChevronDown, LogOut, Settings, BookOpen, HelpCircle
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
-import { getCourses, CourseWithModules } from '@/lib/api';
+import { getCourses, CourseWithModules, getNotifications, markNotificationAsRead, markAllNotificationsAsRead, NotificationRow } from '@/lib/api';
 import './Topbar.css';
 
 interface SearchResult {
@@ -31,12 +31,8 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
     const [allData, setAllData] = useState<CourseWithModules[]>([]);
     const [showSearch, setShowSearch] = useState(false);
-    const [notifications, setNotifications] = useState([
-        { id: 1, text: 'New IMAT 2025 questions available!', time: '2h ago', unread: true },
-        { id: 2, text: `Your study streak is growing! 🔥`, time: '5h ago', unread: true },
-        { id: 3, text: 'Biology module updated with new content', time: '1d ago', unread: false },
-    ]);
-    const hasUnread = notifications.some(n => n.unread);
+    const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+    const hasUnread = notifications.some(n => !n.is_read);
     const searchRef = useRef<HTMLDivElement>(null);
 
     // Fall back to email from auth user if profile not loaded yet
@@ -54,7 +50,15 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
             .catch(err => {
                 if (!isAbortError(err)) console.error('Topbar search load error:', err);
             });
-    }, [supabase, getSignal]);
+            
+        if (user) {
+            getNotifications(supabase, user.id, signal)
+                .then(setNotifications)
+                .catch(err => {
+                    if (!isAbortError(err)) console.error('Notifications load error:', err);
+                });
+        }
+    }, [supabase, user, getSignal]);
 
     // Close search on click outside
     useEffect(() => {
@@ -128,8 +132,20 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
         window.location.href = '/login';
     };
 
-    const markAllRead = () => {
-        setNotifications(prev => prev.map(n => ({ ...n, unread: false })));
+    const markAllRead = async () => {
+        if (!user) return;
+        setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+        await markAllNotificationsAsRead(supabase, user.id);
+    };
+
+    const handleNotificationClick = async (n: NotificationRow) => {
+        if (!n.is_read) {
+            setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, is_read: true } : notif));
+            await markNotificationAsRead(supabase, n.id);
+        }
+        if (n.link) {
+            window.location.href = n.link;
+        }
     };
 
     return (
@@ -215,10 +231,15 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
                                     Mark all read
                                 </button>
                             </div>
-                            {notifications.map((n) => (
-                                <div key={n.id} className={`notification-item ${n.unread ? 'unread' : ''}`}>
-                                    <p>{n.text}</p>
-                                    <span className="notification-time">{n.time}</span>
+                            {notifications.length === 0 ? (
+                                <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--fs-sm)' }}>
+                                    No notifications
+                                </div>
+                            ) : notifications.map((n) => (
+                                <div key={n.id} className={`notification-item ${!n.is_read ? 'unread' : ''}`} onClick={() => handleNotificationClick(n)} style={{ cursor: n.link || !n.is_read ? 'pointer' : 'default' }}>
+                                    <div style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: 2 }}>{n.title}</div>
+                                    <p>{n.message}</p>
+                                    <span className="notification-time">{new Date(n.created_at).toLocaleDateString()}</span>
                                 </div>
                             ))}
                         </div>

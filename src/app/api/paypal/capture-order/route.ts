@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { createClient as createSupabaseServer } from '@/lib/supabase-server';
+import { z } from 'zod';
+import { Ratelimit } from '@upstash/ratelimit';
+import { kv } from '@vercel/kv';
 
 const PAYPAL_BASE = process.env.PAYPAL_MODE === 'live'
     ? 'https://api-m.paypal.com'
@@ -8,10 +12,19 @@ const PAYPAL_BASE = process.env.PAYPAL_MODE === 'live'
 const CLIENT_ID = process.env.PAYPAL_CLIENT_ID!;
 const SECRET = process.env.PAYPAL_SECRET!;
 
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const captureOrderSchema = z.object({
+    orderId: z.string().min(1, 'orderId is required'),
+    paymentId: z.string().optional(),
+    sectionId: z.string().min(1, 'sectionId is required')
+});
+
+const ratelimit = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN
+    ? new Ratelimit({
+          redis: kv,
+          limiter: Ratelimit.slidingWindow(5, '10 s'),
+          analytics: true,
+      })
+    : null;
 
 async function getAccessToken(): Promise<string> {
     const res = await fetch(`${PAYPAL_BASE}/v1/oauth2/token`, {
@@ -27,13 +40,63 @@ async function getAccessToken(): Promise<string> {
 }
 
 // POST /api/paypal/capture-order
-// Body: { orderId, paymentId, userId, sectionId }
+// Body: { orderId, paymentId?, sectionId }
 export async function POST(req: NextRequest) {
-    try {
-        const { orderId, paymentId, userId, sectionId } = await req.json();
+    // --- C3 fix: service-role client created inside handler, not at module scope ---
+    const adminSupabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-        if (!orderId || !userId || !sectionId) {
-            return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    try {
+        // --- Rate Limiting (H2) ---
+        if (ratelimit) {
+            const ip = req.headers.get('x-forwarded-for') ?? 'anonymous';
+            const { success } = await ratelimit.limit(`ratelimit_${ip}`);
+            if (!success) {
+                return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+            }
+        }
+
+        // --- C1 fix: verify the caller is actually the authenticated user ---
+        const supabase = await createSupabaseServer();
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // --- Request Validation (M3) ---
+        const rawBody = await req.json();
+        const parsed = captureOrderSchema.safeParse(rawBody);
+        
+        if (!parsed.success) {
+            return NextResponse.json({ error: 'Invalid request parameters', details: parsed.error.format() }, { status: 400 });
+        }
+
+        const { orderId, paymentId, sectionId } = parsed.data;
+
+        // --- Security: verify sectionId belongs to a valid section ---
+        const { data: section, error: sectionErr } = await adminSupabase
+            .from('course_sections')
+            .select('id')
+            .eq('id', sectionId)
+            .single();
+
+        if (sectionErr || !section) {
+            return NextResponse.json({ error: 'Invalid section' }, { status: 400 });
+        }
+
+        // --- Security: if paymentId provided, verify it belongs to this user ---
+        if (paymentId) {
+            const { data: payment, error: paymentErr } = await adminSupabase
+                .from('payments')
+                .select('id, user_id')
+                .eq('id', paymentId)
+                .single();
+
+            if (paymentErr || !payment || payment.user_id !== user.id) {
+                return NextResponse.json({ error: 'Invalid payment reference' }, { status: 403 });
+            }
         }
 
         const token = await getAccessToken();
@@ -54,7 +117,7 @@ export async function POST(req: NextRequest) {
 
             // Update payment to failed
             if (paymentId) {
-                await supabase.from('payments').update({ status: 'failed' }).eq('id', paymentId);
+                await adminSupabase.from('payments').update({ status: 'failed' }).eq('id', paymentId);
             }
             return NextResponse.json({ error: 'Payment capture failed', details: captureData }, { status: 400 });
         }
@@ -63,7 +126,7 @@ export async function POST(req: NextRequest) {
         const now = new Date().toISOString();
 
         if (paymentId) {
-            await supabase.from('payments').update({
+            await adminSupabase.from('payments').update({
                 status: 'paid',
                 paid_at: now,
                 paypal_order_id: orderId,
@@ -73,8 +136,8 @@ export async function POST(req: NextRequest) {
             const amount = parseFloat(
                 captureData.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.value || '0'
             );
-            const { data: newPayment } = await supabase.from('payments').insert({
-                user_id: userId,
+            const { data: newPayment } = await adminSupabase.from('payments').insert({
+                user_id: user.id,   // Use the verified session user, not client-supplied userId
                 section_id: sectionId,
                 amount,
                 currency: 'EUR',
@@ -84,9 +147,8 @@ export async function POST(req: NextRequest) {
             }).select('id').single();
 
             if (newPayment?.id) {
-                // Grant section access
-                await supabase.from('student_section_access').upsert({
-                    user_id: userId,
+                await adminSupabase.from('student_section_access').upsert({
+                    user_id: user.id,
                     section_id: sectionId,
                     payment_id: newPayment.id,
                     status: 'active',
@@ -95,19 +157,21 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // Grant access
-        await supabase.from('student_section_access').upsert({
-            user_id: userId,
+        // Grant access (idempotent upsert — safe to call twice)
+        await adminSupabase.from('student_section_access').upsert({
+            user_id: user.id,   // Always use verified session user
             section_id: sectionId,
             status: 'active',
             granted_by_admin: false,
         }, { onConflict: 'user_id,section_id' });
 
         // Increment coupon uses if applicable
-        const { data: payment } = await supabase
-            .from('payments').select('coupon_id').eq('id', paymentId).single();
-        if (payment?.coupon_id) {
-            await supabase.rpc('increment_coupon_uses', { coupon_id: payment.coupon_id });
+        if (paymentId) {
+            const { data: payment } = await adminSupabase
+                .from('payments').select('coupon_id').eq('id', paymentId).single();
+            if (payment?.coupon_id) {
+                await adminSupabase.rpc('increment_coupon_uses', { coupon_id: payment.coupon_id });
+            }
         }
 
         return NextResponse.json({ success: true, status: captureData.status });
