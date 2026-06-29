@@ -1097,15 +1097,20 @@ export async function markAllNotificationsAsRead(supabase: SupabaseClient, userI
 export async function adminSendNotification(
     supabase: SupabaseClient,
     payload: { title: string; message: string; type: string; link: string; targetUserId: string }
-): Promise<{ error: Error | null }> {
+): Promise<{ error: Error | null; recipientCount?: number }> {
     try {
         if (payload.targetUserId === 'all') {
-            // Fetch all users to broadcast
-            const { data: users, error: fetchError } = await supabase.from('profiles').select('id');
-            if (fetchError) return { error: new Error(fetchError.message) };
-            if (!users || users.length === 0) return { error: null };
+            // Fetch all user IDs to broadcast.
+            // REQUIRES: "Admins can view all profiles" RLS policy to be applied
+            // (run fix-admin-rls.sql in Supabase SQL Editor if this returns only 1 user).
+            const { data: users, error: fetchError } = await supabase
+                .from('profiles')
+                .select('id');
 
-            const notifications = users.map(u => ({
+            if (fetchError) return { error: new Error(fetchError.message) };
+            if (!users || users.length === 0) return { error: null, recipientCount: 0 };
+
+            const notificationRows = users.map(u => ({
                 user_id: u.id,
                 title: payload.title,
                 message: payload.message,
@@ -1113,11 +1118,17 @@ export async function adminSendNotification(
                 link: payload.link || null,
             }));
 
-            // Insert in batches if large, but Supabase insert handles arrays well up to ~1k-10k.
-            const { error } = await supabase.from('notifications').insert(notifications);
-            return { error: error ? new Error(error.message) : null };
+            // Batch in groups of 500 to stay well within Supabase's request size limits
+            const BATCH_SIZE = 500;
+            for (let i = 0; i < notificationRows.length; i += BATCH_SIZE) {
+                const batch = notificationRows.slice(i, i + BATCH_SIZE);
+                const { error } = await supabase.from('notifications').insert(batch);
+                if (error) return { error: new Error(error.message) };
+            }
+
+            return { error: null, recipientCount: users.length };
         } else {
-            // Send to single user
+            // Send to a single user
             const { error } = await supabase.from('notifications').insert({
                 user_id: payload.targetUserId,
                 title: payload.title,
@@ -1125,7 +1136,7 @@ export async function adminSendNotification(
                 type: payload.type,
                 link: payload.link || null,
             });
-            return { error: error ? new Error(error.message) : null };
+            return { error: error ? new Error(error.message) : null, recipientCount: error ? 0 : 1 };
         }
     } catch (e: any) {
         return { error: new Error(e.message) };

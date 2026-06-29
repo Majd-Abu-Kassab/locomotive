@@ -40,9 +40,13 @@ export default function AdminPage() {
 
     const [tab, setTab] = useState<Tab>('courses');
     const [loading, setLoading] = useState(true);
+    // Keep a ref to courses so the tab-data effect can read it without depending on it
+    const coursesRef = useRef<CourseWithModules[]>([]);
 
     // Courses tab
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
+    // Keep ref in sync with state
+    useEffect(() => { coursesRef.current = courses; }, [courses]);
     const [editingCourse, setEditingCourse] = useState<Partial<CourseWithModules> | null>(null);
     const [savingCourse, setSavingCourse] = useState(false);
 
@@ -166,6 +170,8 @@ export default function AdminPage() {
     }, [selectedCourseId, courses, supabase]);
 
     // Load students and finance data on tab switch
+    // NOTE: We intentionally exclude `courses` from deps and read it via coursesRef
+    // to prevent this effect from re-running every time a course/module is saved.
     useEffect(() => {
         const controller = new AbortController();
         const signal = controller.signal;
@@ -174,8 +180,10 @@ export default function AdminPage() {
                 if (tab === 'students') {
                     const access = await adminGetAllStudentAccess(supabase, signal);
                     setStudentAccess(access);
+                    // Read latest courses from ref — avoids stale closure without adding
+                    // courses as a reactive dependency (which caused cascading re-fetches)
                     const results = await Promise.all(
-                        courses.map(c =>
+                        coursesRef.current.map(c =>
                             getCourseSections(supabase, c.id, undefined, signal).then(sects =>
                                 sects.map(s => ({ ...s, courseName: c.name }))
                             )
@@ -210,14 +218,17 @@ export default function AdminPage() {
                     setTeamMembers(members);
                 }
             } catch (err) {
+                // Always reset analytics loading flag — even on abort — so the
+                // spinner is never left stuck after a quick tab switch.
+                setAnalyticsLoading(false);
                 if (isAbortError(err)) return;
                 console.error('Tab data load error:', err);
-                setAnalyticsLoading(false);
             }
         }
         loadTabData();
         return () => controller.abort('AbortError');
-    }, [tab, courses, qSortBy, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tab, qSortBy, supabase]);
 
     if (!profile?.admin_role) {
         return (
@@ -465,9 +476,12 @@ export default function AdminPage() {
             return;
         }
         setSendingNotification(true);
-        const { error } = await adminSendNotification(supabase, notificationPayload);
+        const { error, recipientCount } = await adminSendNotification(supabase, notificationPayload);
         if (error) { addToast(error.message, 'error'); } else {
-            addToast('Notification sent successfully!', 'success');
+            const target = notificationPayload.targetUserId === 'all'
+                ? `${recipientCount ?? '?'} users`
+                : '1 user';
+            addToast(`Notification sent to ${target}!`, 'success');
             setNotificationPayload({ title: '', message: '', type: 'system', link: '', targetUserId: 'all' });
         }
         setSendingNotification(false);
