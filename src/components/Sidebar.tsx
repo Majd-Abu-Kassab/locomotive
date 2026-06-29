@@ -1,6 +1,6 @@
-'use client';
+﻿'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -9,12 +9,6 @@ import {
     Rocket,
     Calendar,
     BookOpen,
-    FlaskConical,
-    Atom,
-    Calculator,
-    Puzzle,
-    Globe2,
-    BookOpenCheck,
     BarChart3,
     ClipboardList,
     HelpCircle,
@@ -28,9 +22,11 @@ import {
     X,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/contexts/SupabaseContext';
+import { getCourses, CourseWithModules } from '@/lib/api';
 import './Sidebar.css';
 
-const navItems = [
+const baseNavItems = [
     {
         category: 'CORE',
         items: [
@@ -43,13 +39,6 @@ const navItems = [
         category: 'STUDY',
         items: [
             { name: 'Schedule', href: '/schedule', icon: Calendar },
-            { name: 'Biology', href: '/courses/biology', icon: BookOpen },
-            { name: 'Chemistry', href: '/courses/chemistry', icon: FlaskConical },
-            { name: 'Physics', href: '/courses/physics', icon: Atom },
-            { name: 'Mathematics', href: '/courses/mathematics', icon: Calculator },
-            { name: 'Logic', href: '/courses/logic', icon: Puzzle },
-            { name: 'General Knowledge', href: '/courses/general-knowledge', icon: Globe2 },
-            { name: 'Reading', href: '/courses/reading-comprehension', icon: BookOpenCheck },
         ],
     },
     {
@@ -86,8 +75,28 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
     const [collapsed, setCollapsed] = useState(false);
     const pathname = usePathname();
     const { profile } = useAuth();
+    const supabase = useSupabase();
+    const [courses, setCourses] = useState<CourseWithModules[]>([]);
 
-    const isPaidPlan = profile?.plan && profile.plan !== 'free-trial';
+    useEffect(() => {
+        getCourses(supabase).then(setCourses).catch(console.error);
+    }, [supabase]);
+
+    // Dynamically insert courses into the STUDY category
+    const navItems = baseNavItems.map(section => {
+        if (section.category === 'STUDY') {
+            const dynamicCourses = courses.map(course => ({
+                name: course.name,
+                href: `/courses/${course.id}`,
+                emoji: course.icon || '📚',
+            }));
+            return {
+                ...section,
+                items: [...section.items, ...dynamicCourses]
+            };
+        }
+        return section;
+    });
 
     return (
         <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileMenuOpen ? 'mobile-open' : ''}`}>
@@ -121,7 +130,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                     <div key={section.category} className="nav-section">
                         {!collapsed && <span className="nav-category">{section.category}</span>}
                         <ul className="nav-list">
-                            {section.items.map((item) => {
+                            {section.items.map((item: any) => {
                                 const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
                                 const Icon = item.icon;
                                 return (
@@ -132,7 +141,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                                             title={collapsed ? item.name : undefined}
                                             onClick={() => setMobileMenuOpen && setMobileMenuOpen(false)}
                                         >
-                                            <Icon size={18} />
+                                            {Icon ? <Icon size={18} /> : <span style={{ fontSize: '18px', width: '18px', display: 'inline-block', textAlign: 'center' }}>{item.emoji}</span>}
                                             {!collapsed && <span>{item.name}</span>}
                                             {isActive && <div className="active-indicator" />}
                                         </Link>
@@ -173,4 +182,3 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
         </aside>
     );
 }
-
