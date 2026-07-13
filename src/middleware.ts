@@ -37,6 +37,24 @@ export async function middleware(request: NextRequest) {
 
     const pathname = request.nextUrl.pathname;
 
+    // getUser() above can silently rotate the session's refresh token,
+    // writing the new cookies onto `supabaseResponse`. Every redirect must
+    // carry those cookies forward (Supabase refresh tokens are single-use) —
+    // otherwise the browser is left holding an already-consumed token, the
+    // very next request fails auth, and you get bounced between
+    // login/admin/dashboard in a loop.
+    const redirectTo = (path: string, params?: Record<string, string>) => {
+        const url = request.nextUrl.clone();
+        url.pathname = path;
+        url.search = '';
+        if (params) {
+            Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+        }
+        const redirect = NextResponse.redirect(url);
+        supabaseResponse.cookies.getAll().forEach(cookie => redirect.cookies.set(cookie));
+        return redirect;
+    };
+
     // ===== E1: Session inactivity timeout =====
     // Next.js prefetches routes in the background for any <Link> sitting in
     // the viewport (and on hover/focus) — those requests hit this middleware
@@ -59,10 +77,7 @@ export async function middleware(request: NextRequest) {
             if (elapsed > timeoutMs) {
                 // Session has been inactive too long — sign out and redirect
                 await supabase.auth.signOut();
-                const url = request.nextUrl.clone();
-                url.pathname = '/login';
-                url.searchParams.set('reason', 'session_expired');
-                const redirect = NextResponse.redirect(url);
+                const redirect = redirectTo('/login', { reason: 'session_expired' });
                 // Clear the activity cookie
                 redirect.cookies.delete('loco_last_activity');
                 return redirect;
@@ -91,24 +106,18 @@ export async function middleware(request: NextRequest) {
 
     // If user is NOT logged in and trying to access protected route
     if (!user && !isPublicRoute) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/login';
-        return NextResponse.redirect(url);
+        return redirectTo('/login');
     }
 
     // If user IS logged in and trying to access login/register
     if (user && (pathname === '/login' || pathname === '/register')) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/dashboard';
-        return NextResponse.redirect(url);
+        return redirectTo('/dashboard');
     }
 
     // ===== H1: Admin route protection (server-side) =====
     if (pathname.startsWith('/admin')) {
         if (!user) {
-            const url = request.nextUrl.clone();
-            url.pathname = '/login';
-            return NextResponse.redirect(url);
+            return redirectTo('/login');
         }
 
         // Fetch admin_role directly — avoids relying on client-side profile state
@@ -120,9 +129,7 @@ export async function middleware(request: NextRequest) {
 
         if (!profile?.admin_role) {
             // Authenticated but not an admin — redirect to dashboard
-            const url = request.nextUrl.clone();
-            url.pathname = '/dashboard';
-            return NextResponse.redirect(url);
+            return redirectTo('/dashboard');
         }
     }
 
