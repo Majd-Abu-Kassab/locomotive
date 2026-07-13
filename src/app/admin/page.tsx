@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import {
     Plus, Trash2, Edit3, Save, X, Loader2, BookOpen, HelpCircle,
@@ -34,9 +35,10 @@ import {
 type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics' | 'team' | 'notifications';
 
 export default function AdminPage() {
-    const { profile } = useAuth();
+    const { profile, user, loading: authLoading } = useAuth();
     const { addToast } = useToast();
     const supabase = useSupabase();
+    const router = useRouter();
 
     const [tab, setTab] = useState<Tab>('courses');
     const [loading, setLoading] = useState(true);
@@ -229,6 +231,27 @@ export default function AdminPage() {
         return () => controller.abort('AbortError');
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tab, qSortBy, supabase]);
+
+    // Auth is still resolving (initial session/profile fetch) — don't judge
+    // admin status yet, or we'll flash "Access Denied" on every load/expired
+    // session before we actually know who the user is.
+    if (authLoading) {
+        return (
+            <AppLayout>
+                <div className="page-wrapper" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+                    <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--text-tertiary)' }} />
+                </div>
+            </AppLayout>
+        );
+    }
+
+    // Auth resolved and there's no session at all — this is a genuinely
+    // expired/invalid session, not "logged in but not an admin". Send them
+    // to login instead of stranding them on a denial screen.
+    if (!user) {
+        router.replace('/login');
+        return null;
+    }
 
     if (!profile?.admin_role) {
         return (

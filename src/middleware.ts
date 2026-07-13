@@ -38,6 +38,15 @@ export async function middleware(request: NextRequest) {
     const pathname = request.nextUrl.pathname;
 
     // ===== E1: Session inactivity timeout =====
+    // Next.js prefetches routes in the background for any <Link> sitting in
+    // the viewport (and on hover/focus) — those requests hit this middleware
+    // too, but they're not real user activity. If we treated them as
+    // activity, a genuinely idle tab could keep resetting its own timer
+    // forever just because links are visible on screen. We still *enforce*
+    // the timeout on prefetch requests (so an already-expired session is
+    // still cut off), we just don't let them push the timer back out.
+    const isPrefetch = request.headers.get('next-router-prefetch') !== null;
+
     if (user) {
         const lastActivityCookie = request.cookies.get('loco_last_activity')?.value;
         const now = Date.now();
@@ -60,13 +69,15 @@ export async function middleware(request: NextRequest) {
             }
         }
 
-        // Refresh last-activity timestamp on every authenticated request
-        supabaseResponse.cookies.set('loco_last_activity', String(now), {
-            httpOnly: true,
-            sameSite: 'lax',
-            // No 'secure' needed — handled by HSTS in next.config.ts
-            path: '/',
-        });
+        // Refresh last-activity timestamp on genuine navigations/requests only
+        if (!isPrefetch) {
+            supabaseResponse.cookies.set('loco_last_activity', String(now), {
+                httpOnly: true,
+                sameSite: 'lax',
+                // No 'secure' needed — handled by HSTS in next.config.ts
+                path: '/',
+            });
+        }
     } else {
         // No user — clear any stale activity cookie
         supabaseResponse.cookies.delete('loco_last_activity');
