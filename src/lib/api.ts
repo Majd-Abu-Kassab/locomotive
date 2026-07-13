@@ -104,41 +104,26 @@ export interface NotificationRow {
 
 // ===== COURSES =====
 export async function getCourses(supabase: SupabaseClient, userId?: string, signal?: AbortSignal): Promise<CourseWithModules[]> {
-    // Fetch courses, modules, topics
-    const { data: coursesData } = await supabase
-        .from('courses')
-        .select('*')
-        .order('sort_order')
-        .abortSignal(signal!);
+    // Run all database fetches concurrently to eliminate sequential lag
+    const [{ data: coursesData }, { data: modulesData }, { data: topicsData }, { data: progressData }] = await Promise.all([
+        supabase.from('courses').select('*').order('sort_order').abortSignal(signal!),
+        supabase.from('modules').select('*').order('sort_order').abortSignal(signal!),
+        supabase.from('topics').select('*').order('sort_order').abortSignal(signal!),
+        userId
+            ? supabase.from('user_topic_progress')
+                .select('topic_id, completed')
+                .eq('user_id', userId)
+                .eq('completed', true)
+                .abortSignal(signal!)
+            : Promise.resolve({ data: null as { topic_id: string; completed: boolean }[] | null }),
+    ]);
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-    const { data: modulesData } = await supabase
-        .from('modules')
-        .select('*')
-        .order('sort_order')
-        .abortSignal(signal!);
-
-    const { data: topicsData } = await supabase
-        .from('topics')
-        .select('*')
-        .order('sort_order')
-        .abortSignal(signal!);
-
-    // Fetch user progress if logged in
-    let progressMap: Record<string, boolean> = {};
-    if (userId) {
-        const { data: progressData } = await supabase
-            .from('user_topic_progress')
-            .select('topic_id, completed')
-            .eq('user_id', userId)
-            .eq('completed', true)
-            .abortSignal(signal!);
-
-        if (progressData) {
-            progressData.forEach(p => { progressMap[p.topic_id] = true; });
-        }
+    const progressMap: Record<string, boolean> = {};
+    if (progressData) {
+        progressData.forEach((p) => { progressMap[p.topic_id] = true; });
     }
 
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (!coursesData || !modulesData || !topicsData) return [];
 
     // Assemble nested structure
@@ -461,6 +446,7 @@ export interface PaymentRow {
     currency: string;
     status: 'pending' | 'paid' | 'failed' | 'refunded';
     paypal_order_id: string | null;
+    paypal_subscription_id: string | null;
     coupon_id: string | null;
     discount_amount: number;
     notes: string | null;
@@ -501,37 +487,26 @@ export interface StudentAccessRow {
 
 // ===== SECTIONS =====
 export async function getCourseSections(supabase: SupabaseClient, courseId: string, userId?: string, signal?: AbortSignal): Promise<CourseSection[]> {
-    const { data: sections } = await supabase
-        .from('course_sections')
-        .select('*, section_module_map(module_id)')
-        .eq('course_id', courseId)
-        .order('sort_order')
-        .abortSignal(signal!);
+    const [{ data: sections }, { data: access }] = await Promise.all([
+        supabase
+            .from('course_sections')
+            .select('*, section_module_map(module_id)')
+            .eq('course_id', courseId)
+            .order('sort_order')
+            .abortSignal(signal!),
+        userId
+            ? supabase
+                .from('student_section_access')
+                .select('section_id')
+                .eq('user_id', userId)
+                .in('status', ['active', 'free_grant'])
+                .abortSignal(signal!)
+            : Promise.resolve({ data: null as { section_id: string }[] | null }),
+    ]);
 
     if (!sections) return [];
 
-    let unlockedSectionIds = new Set<string>();
-    if (userId) {
-        const { data: access } = await supabase
-            .from('student_section_access')
-            .select('section_id')
-            .eq('user_id', userId)
-            .eq('status', 'active')
-            .in('section_id', sections.map(s => s.id))
-            .abortSignal(signal!);
-
-        // Also check free_grant
-        const { data: grants } = await supabase
-            .from('student_section_access')
-            .select('section_id')
-            .eq('user_id', userId)
-            .eq('status', 'free_grant')
-            .in('section_id', sections.map(s => s.id))
-            .abortSignal(signal!);
-
-        (access || []).forEach(a => unlockedSectionIds.add(a.section_id));
-        (grants || []).forEach(a => unlockedSectionIds.add(a.section_id));
-    }
+    const unlockedSectionIds = new Set<string>((access || []).map(a => a.section_id));
 
     return sections.map(s => ({
         id: s.id,
@@ -891,19 +866,20 @@ export async function adminGetQuestionAnalytics(supabase: SupabaseClient, limit 
 }
 
 export async function adminGetStudentRoster(supabase: SupabaseClient, signal?: AbortSignal): Promise<StudentSummary[]> {
-    const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, email, first_name, last_name, study_streak')
-        .order('created_at', { ascending: false })
-        .abortSignal(signal!);
+    const [{ data: profiles }, { data: tests }] = await Promise.all([
+        supabase
+            .from('profiles')
+            .select('id, email, first_name, last_name, study_streak')
+            .order('created_at', { ascending: false })
+            .abortSignal(signal!),
+        supabase
+            .from('test_results')
+            .select('user_id, score, max_score, correct, total_questions, created_at')
+            .order('created_at', { ascending: false })
+            .abortSignal(signal!),
+    ]);
 
     if (!profiles || profiles.length === 0) return [];
-
-    const { data: tests } = await supabase
-        .from('test_results')
-        .select('user_id, score, max_score, correct, total_questions, created_at')
-        .order('created_at', { ascending: false })
-        .abortSignal(signal!);
 
     const testsByUser: Record<string, typeof tests> = {};
     for (const t of (tests || [])) {

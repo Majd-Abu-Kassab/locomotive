@@ -227,7 +227,7 @@ export default function AdminPage() {
         }
         loadTabData();
         return () => controller.abort('AbortError');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tab, qSortBy, supabase]);
 
     if (!profile?.admin_role) {
@@ -405,8 +405,8 @@ export default function AdminPage() {
             currency: editingSection.currency || 'EUR',
             sort_order: editingSection.sort_order || sections.length,
         });
-        
-        if (error) { addToast(error.message, 'error'); } 
+
+        if (error) { addToast(error.message, 'error'); }
         else {
             if (id && moduleIds) {
                 await adminAssignModulesToSection(supabase, id, moduleIds);
@@ -1703,7 +1703,7 @@ export default function AdminPage() {
                     </div>
                 </div>
             )}
-            
+
             {/* ===== MODULE EDIT MODAL ===== */}
             {editingModule && (
                 <div className="modal-overlay" onClick={() => setEditingModule(null)}>

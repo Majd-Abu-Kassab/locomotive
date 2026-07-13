@@ -161,9 +161,9 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                                 const Icon = item.icon;
                                 return (
                                     <li key={item.href}>
-                                        <Link 
-                                            href={item.href} 
-                                            className={`nav-item ${isActive ? 'active' : ''}`} 
+                                        <Link
+                                            href={item.href}
+                                            className={`nav-item ${isActive ? 'active' : ''}`}
                                             title={collapsed ? item.name : undefined}
                                             onClick={() => setMobileMenuOpen && setMobileMenuOpen(false)}
                                         >
