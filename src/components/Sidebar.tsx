@@ -54,7 +54,7 @@ const baseNavItems = [
             { name: 'FAQs', href: '/faq', icon: HelpCircle },
             { name: 'Contact Support', href: '/contact', icon: MessageSquare },
             { name: 'Order History', href: '/order-history', icon: Receipt },
-            { name: 'Upgrade Plan', href: '/upgrade', icon: Crown },
+            { name: 'Unlock Courses', href: '/upgrade', icon: Crown },
         ],
     },
 ];
@@ -137,7 +137,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                                     <li key={item.href}>
                                         <Link
                                             href={item.href}
-                                            className={`nav-item ${isActive ? 'active' : ''} ${item.name === 'Upgrade Plan' ? 'upgrade-item' : ''}`}
+                                            className={`nav-item ${isActive ? 'active' : ''} ${item.name === 'Unlock Courses' ? 'upgrade-item' : ''}`}
                                             title={collapsed ? item.name : undefined}
                                             onClick={() => setMobileMenuOpen && setMobileMenuOpen(false)}
                                         >

@@ -174,8 +174,9 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
                 />
                 {searchQuery && (
                     <button
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 4 }}
+                        className="search-clear"
                         onClick={() => { setSearchQuery(''); setShowSearch(false); }}
+                        aria-label="Clear search"
                     >
                         <X size={14} />
                     </button>

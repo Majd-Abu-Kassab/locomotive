@@ -1,14 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/contexts/AuthContext';
-import { User, Mail, Lock, CreditCard, Save, Loader2, CheckCircle, Target, Calendar, BookOpen } from 'lucide-react';
+import { User, Mail, Lock, CreditCard, Save, Loader2, CheckCircle, Target, Calendar, BookOpen, Receipt, ArrowRight } from 'lucide-react';
 import { useSupabase } from '@/contexts/SupabaseContext';
+import { useAbortController, isAbortError } from '@/hooks/useAbortController';
+import { getStudentPayments, StudentPaymentRow, getCourses, CourseWithModules } from '@/lib/api';
 
 export default function ProfilePage() {
     const { profile, updateProfile } = useAuth();
     const supabase = useSupabase();
+    const { getSignal } = useAbortController();
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [email, setEmail] = useState('');
@@ -22,14 +26,19 @@ export default function ProfilePage() {
     const [passwordSaving, setPasswordSaving] = useState(false);
     const [passwordSaved, setPasswordSaved] = useState(false);
 
+    // Billing summary state
+    const [payments, setPayments] = useState<StudentPaymentRow[]>([]);
+    const [paymentsLoading, setPaymentsLoading] = useState(true);
+
+    // Courses drive the Focus Subjects options (what the site actually offers)
+    const [courses, setCourses] = useState<CourseWithModules[]>([]);
+
     // Study preferences state
     const [focusSubjects, setFocusSubjects] = useState<string[]>([]);
     const [examDate, setExamDate] = useState('');
     const [studyHours, setStudyHours] = useState('2');
     const [prefSaving, setPrefSaving] = useState(false);
     const [prefSaved, setPrefSaved] = useState(false);
-
-    const ALL_SUBJECTS = ['Biology', 'Chemistry', 'Physics', 'Mathematics', 'Logic', 'General Knowledge', 'Reading'];
 
     useEffect(() => {
         if (profile) {
@@ -42,7 +51,40 @@ export default function ProfilePage() {
         }
     }, [profile]);
 
+    // Load payment history (billing summary) and courses (focus-subject options)
+    // together on one abort signal — useAbortController shares a single
+    // controller, so two separate getSignal() calls would abort each other.
+    useEffect(() => {
+        if (!profile?.id) return;
+        const userId = profile.id;
+        const signal = getSignal();
+        async function load() {
+            try {
+                const [p, c] = await Promise.all([
+                    getStudentPayments(supabase, userId, signal),
+                    getCourses(supabase, undefined, signal),
+                ]);
+                setPayments(p);
+                setCourses(c);
+            } catch (err) {
+                if (isAbortError(err)) return;
+                console.error('Error loading profile billing/courses:', err);
+            } finally {
+                setPaymentsLoading(false);
+            }
+        }
+        load();
+    }, [profile?.id, supabase, getSignal]);
+
     const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || 'User';
+
+    // Focus-subject options come from the site's actual courses. Union in any
+    // already-saved selections so a previously-picked subject that is no longer
+    // a course still shows (and isn't silently dropped on the next save).
+    const subjectOptions = Array.from(new Set([
+        ...courses.map(c => c.name),
+        ...focusSubjects,
+    ]));
 
     const handleSaveProfile = async () => {
         setSaving(true);
@@ -133,7 +175,6 @@ export default function ProfilePage() {
                             }
                         </p>
                     </div>
-                    <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }}>Change Photo</button>
                 </div>
 
                 {/* Personal Info */}
@@ -208,7 +249,10 @@ export default function ProfilePage() {
                                 <BookOpen size={14} /> Focus Subjects
                             </label>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-2)' }}>
-                                {ALL_SUBJECTS.map(s => {
+                                {subjectOptions.length === 0 && (
+                                    <p className="text-secondary text-sm">No courses available yet.</p>
+                                )}
+                                {subjectOptions.map(s => {
                                     const active = focusSubjects.includes(s);
                                     return (
                                         <button
@@ -302,22 +346,69 @@ export default function ProfilePage() {
                     </div>
                 </div>
 
-                {/* Payment */}
+                {/* Billing */}
                 <div className="card">
                     <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-5)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                        <CreditCard size={18} /> Payment Methods
+                        <CreditCard size={18} /> Billing
                     </h3>
+
+                    {/* Current plan */}
                     <div style={{
-                        padding: 'var(--space-5)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)',
-                        border: '1px dashed var(--border-primary)', textAlign: 'center',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: 'var(--space-4)', background: 'var(--bg-glass)',
+                        borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-4)',
                     }}>
-                        <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-3)' }}>
-                            No payment method on file
-                        </p>
-                        <button className="btn btn-secondary btn-sm">
-                            <CreditCard size={14} /> Add Payment Method
-                        </button>
+                        <div>
+                            <div className="text-xs text-secondary">Current Plan</div>
+                            <div style={{ fontWeight: 600, fontSize: 'var(--fs-md)' }}>
+                                {profile.plan === 'free-trial' ? 'Free Plan' : profile.plan.charAt(0).toUpperCase() + profile.plan.slice(1)}
+                            </div>
+                        </div>
+                        <Link href="/upgrade" className="btn btn-secondary btn-sm">Upgrade <ArrowRight size={14} /></Link>
                     </div>
+
+                    {/* Payment summary (real PayPal history) */}
+                    {paymentsLoading ? (
+                        <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-4)' }}>
+                            <Loader2 size={20} style={{ animation: 'spin 1s linear infinite', color: 'var(--text-tertiary)' }} />
+                        </div>
+                    ) : (() => {
+                        const paid = payments.filter(p => p.status === 'paid');
+                        const totalSpent = paid.reduce((s, p) => s + Number(p.amount), 0);
+                        const lastPaid = paid[0];
+                        if (paid.length === 0) {
+                            return (
+                                <p className="text-secondary text-sm" style={{ textAlign: 'center', padding: 'var(--space-3)' }}>
+                                    No payments yet.
+                                </p>
+                            );
+                        }
+                        return (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+                                <div className="stat-card">
+                                    <div className="stat-value">{paid.length}</div>
+                                    <div className="stat-label">Payments</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-value">€{totalSpent.toFixed(2)}</div>
+                                    <div className="stat-label">Total Spent</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-value" style={{ fontSize: 'var(--fs-md)' }}>
+                                        {new Date(lastPaid.paid_at || lastPaid.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                    </div>
+                                    <div className="stat-label">Last Payment</div>
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    <Link href="/order-history" className="btn btn-ghost btn-sm" style={{ width: '100%' }}>
+                        <Receipt size={14} /> View Order History
+                    </Link>
+                    <p className="text-xs text-secondary" style={{ textAlign: 'center', marginTop: 'var(--space-3)' }}>
+                        Payments are processed securely through PayPal — no card details are stored here.
+                    </p>
                 </div>
             </div>
         </AppLayout>
