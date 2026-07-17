@@ -11,11 +11,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourse, getCourseSections, getQuestions, markTopicComplete, markTopicIncomplete, CourseWithModules, TopicWithProgress, QuestionRow, CourseSection } from '@/lib/api';
+import { decodeParam } from '@/lib/params';
 import { RichTextPreview } from '@/components/RichTextEditor';
 import 'katex/dist/katex.min.css';
 
 export default function LessonPage({ params }: { params: Promise<{ courseId: string; lessonId: string }> }) {
-    const { courseId, lessonId } = use(params);
+    const resolved = use(params);
+    const courseId = decodeParam(resolved.courseId);
+    const lessonId = decodeParam(resolved.lessonId);
     const { user, loading: authLoading } = useAuth();
     const supabase = useSupabase();
     const { getSignal } = useAbortController();

@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourse, getCourseSections, CourseWithModules, CourseSection } from '@/lib/api';
+import { decodeParam } from '@/lib/params';
 
 const lessonTypeIcon: Record<string, React.ReactNode> = {
     video: <Video size={14} />,
@@ -26,7 +27,7 @@ const lessonTypeLabel: Record<string, string> = {
 };
 
 export default function CourseDetailPage({ params }: { params: Promise<{ courseId: string }> }) {
-    const { courseId } = use(params);
+    const courseId = decodeParam(use(params).courseId);
     const { user } = useAuth();
     const supabase = useSupabase();
     const { getSignal } = useAbortController();
