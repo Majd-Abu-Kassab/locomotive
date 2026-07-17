@@ -666,13 +666,21 @@ export default function AdminPage() {
                                     <table>
                                         <thead><tr><th>Icon</th><th>Name</th><th>ID</th><th>Lessons</th><th>Questions</th><th>Actions</th></tr></thead>
                                         <tbody>
-                                            {courses.map(course => (
+                                            {courses.map(course => {
+                                                // Count live from actual data rather than the static
+                                                // total_lessons/total_questions columns (which are only set
+                                                // manually at course creation and quickly go stale):
+                                                //   lessons  = topics across this course's modules
+                                                //   questions = bank questions whose subject == course name
+                                                const lessonCount = course.modules.reduce((n, m) => n + m.topics.length, 0);
+                                                const questionCount = questions.filter(q => q.subject === course.name).length;
+                                                return (
                                                 <tr key={course.id}>
                                                     <td>{course.icon}</td>
                                                     <td style={{ fontWeight: 500 }}>{course.name}</td>
                                                     <td className="text-secondary text-xs">{course.id}</td>
-                                                    <td>{course.total_lessons}</td>
-                                                    <td>{course.total_questions}</td>
+                                                    <td>{lessonCount}</td>
+                                                    <td>{questionCount}</td>
                                                     <td>
                                                         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
                                                             <button className="btn btn-secondary btn-sm" onClick={() => setManagingCourseStructure(course.id)}><FolderTree size={14} /> Structure</button>
@@ -681,7 +689,8 @@ export default function AdminPage() {
                                                         </div>
                                                     </td>
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
