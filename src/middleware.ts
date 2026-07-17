@@ -99,7 +99,7 @@ export async function middleware(request: NextRequest) {
     }
 
     // Public routes that don't require auth
-    const publicRoutes = ['/login', '/register', '/', '/auth/callback', '/faq', '/contact'];
+    const publicRoutes = ['/login', '/register', '/forgot-password', '/reset-password', '/', '/auth/callback', '/faq', '/contact'];
     const isPublicRoute = publicRoutes.some(route =>
         pathname === route || pathname.startsWith('/auth/')
     );

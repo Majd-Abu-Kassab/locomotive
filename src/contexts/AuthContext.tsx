@@ -34,6 +34,8 @@ interface AuthContextType {
     signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
     signUp: (email: string, password: string, metadata?: Record<string, unknown>) => Promise<{ error: AuthError | null }>;
     signInWithGoogle: () => Promise<{ error: AuthError | null }>;
+    resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
+    updatePassword: (password: string) => Promise<{ error: AuthError | null }>;
     signOut: () => Promise<void>;
     updateProfile: (updates: Partial<Profile>) => Promise<{ error: Error | null }>;
     refreshProfile: () => Promise<void>;
@@ -70,21 +72,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [user, fetchProfile]);
 
     useEffect(() => {
+        let cancelled = false;
+
+        // Failsafe: the Supabase auth client serializes session reads behind a
+        // navigator lock. If a tab is closed mid-read, the next tab's
+        // getSession() can hang — and since `loading` only clears once that
+        // call resolves, the app is stuck on the loading spinner forever.
+        // Never let loading stay true beyond this cap; the onAuthStateChange
+        // listener below still fills in the user/profile if the read lands late.
+        const failsafe = setTimeout(() => {
+            if (!cancelled) setLoading(false);
+        }, 8000);
+
         // Get initial session
         const initAuth = async () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession();
+                if (cancelled) return;
                 const currentUser = session?.user ?? null;
                 setUser(currentUser);
 
                 if (currentUser) {
                     const p = await fetchProfile(currentUser.id);
-                    setProfile(p);
+                    if (!cancelled) setProfile(p);
                 }
             } catch (error) {
                 console.error('Auth initialization error:', error);
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
 
@@ -93,21 +108,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (event, session) => {
+                if (cancelled) return;
                 const currentUser = session?.user ?? null;
                 setUser(currentUser);
 
                 if (currentUser) {
                     const p = await fetchProfile(currentUser.id);
-                    setProfile(p);
+                    if (!cancelled) setProfile(p);
                 } else {
                     setProfile(null);
                 }
 
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         );
 
         return () => {
+            cancelled = true;
+            clearTimeout(failsafe);
             subscription.unsubscribe();
         };
     }, [supabase, fetchProfile]);
@@ -133,6 +151,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 redirectTo: `${window.location.origin}/auth/callback`,
             },
         });
+        return { error };
+    };
+
+    // Send a password-recovery email. The link routes through /auth/callback
+    // (which exchanges the recovery code for a session) and then lands the user
+    // on /reset-password to choose a new password.
+    const resetPassword = async (email: string) => {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+        });
+        return { error };
+    };
+
+    // Set a new password for the currently authenticated session (used by the
+    // reset-password page once the recovery session is active).
+    const updatePassword = async (password: string) => {
+        const { error } = await supabase.auth.updateUser({ password });
         return { error };
     };
 
@@ -167,7 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return (
         <AuthContext.Provider value={{
             user, profile, loading,
-            signIn, signUp, signInWithGoogle, signOut,
+            signIn, signUp, signInWithGoogle, resetPassword, updatePassword, signOut,
             updateProfile, refreshProfile,
         }}>
             {children}

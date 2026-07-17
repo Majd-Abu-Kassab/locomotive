@@ -127,7 +127,7 @@ export default function LoginPage() {
                             <input type="checkbox" style={{ accentColor: 'var(--brand-accent)' }} />
                             Remember me
                         </label>
-                        <a href="#" style={{ fontSize: 'var(--fs-sm)' }}>Forgot password?</a>
+                        <Link href="/forgot-password" style={{ fontSize: 'var(--fs-sm)' }}>Forgot password?</Link>
                     </div>
 
                     <button type="submit" className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={loading}>
