@@ -26,13 +26,17 @@ export default function SchedulePage() {
     const [savingEvent, setSavingEvent] = useState(false);
 
     useEffect(() => {
+        // Wait for auth to actually resolve a user before deciding we're done
+        // loading. On first mount `user` is null while the session is still
+        // being fetched — flipping loading off here would flash an empty
+        // calendar at a logged-in student until auth resolves and this re-runs.
+        if (!user?.id) return;
+        const userId = user.id;
         const signal = getSignal();
         async function load() {
             try {
-                if (user) {
-                    const data = await getScheduleEvents(supabase, user.id, signal);
-                    setEvents(data);
-                }
+                const data = await getScheduleEvents(supabase, userId, signal);
+                setEvents(data);
             } catch (err) {
                 if (isAbortError(err)) return;
                 console.error('Error fetching schedule events:', err);
@@ -41,7 +45,7 @@ export default function SchedulePage() {
             }
         }
         load();
-    }, [user, supabase, getSignal]);
+    }, [user?.id, supabase, getSignal]);
 
     const getDaysInMonth = (month: number, year: number) => new Date(year, month + 1, 0).getDate();
     const getFirstDayOfMonth = (month: number, year: number) => new Date(year, month, 1).getDay();

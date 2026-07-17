@@ -10,13 +10,17 @@ import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourses, CourseWithModules } from '@/lib/api';
 
 export default function CoursesPage() {
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const supabase = useSupabase();
     const { getSignal } = useAbortController();
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        // Wait for auth to resolve before fetching. Otherwise the first pass
+        // runs with user?.id undefined and completed-lesson progress comes back
+        // empty, flashing every course at 0% until auth resolves and re-runs.
+        if (authLoading) return;
         const signal = getSignal();
         async function load() {
             try {
@@ -30,7 +34,7 @@ export default function CoursesPage() {
             }
         }
         load();
-    }, [user?.id, supabase, getSignal]);
+    }, [authLoading, user?.id, supabase, getSignal]);
 
     if (loading) {
         return (

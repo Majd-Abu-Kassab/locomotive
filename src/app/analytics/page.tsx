@@ -33,13 +33,17 @@ export default function AnalyticsPage() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        // Wait for auth to actually resolve a user before deciding we're done
+        // loading. On first mount `user` is null while the session is still
+        // being fetched — flipping loading off here would flash "No data yet"
+        // at a logged-in student until auth resolves and this effect re-runs.
+        if (!user?.id) return;
+        const userId = user.id;
         const signal = getSignal();
         async function load() {
             try {
-                if (user) {
-                    const data = await getTestResults(supabase, user.id, signal);
-                    setTests(data);
-                }
+                const data = await getTestResults(supabase, userId, signal);
+                setTests(data);
             } catch (err) {
                 if (isAbortError(err)) return;
                 console.error('Error fetching test results:', err);
@@ -48,7 +52,7 @@ export default function AnalyticsPage() {
             }
         }
         load();
-    }, [user, supabase, getSignal]);
+    }, [user?.id, supabase, getSignal]);
 
     if (loading) {
         return (

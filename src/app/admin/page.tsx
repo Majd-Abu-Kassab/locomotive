@@ -1205,7 +1205,14 @@ export default function AdminPage() {
                                     <label>Subject</label>
                                     <select className="select" value={editingQuestion.subject || ''} onChange={e => setEditingQuestion({ ...editingQuestion, subject: e.target.value })}>
                                         <option value="">Select...</option>
-                                        {['Biology', 'Chemistry', 'Physics', 'Mathematics', 'Logic', 'General Knowledge', 'Reading Comprehension'].map(s => <option key={s}>{s}</option>)}
+                                        {/* Subjects are driven by the actual courses — a question's subject
+                                            must match a course name for that course's quizzes to find it.
+                                            Keep the question's current subject as an option too, so editing
+                                            a legacy question whose subject is no longer a course still shows it. */}
+                                        {Array.from(new Set([
+                                            ...courses.map(c => c.name),
+                                            ...(editingQuestion.subject ? [editingQuestion.subject] : []),
+                                        ])).map(s => <option key={s} value={s}>{s}</option>)}
                                     </select>
                                 </div>
                                 <div className="input-group"><label>Topic</label><input className="input" value={editingQuestion.topic || ''} onChange={e => setEditingQuestion({ ...editingQuestion, topic: e.target.value })} placeholder="e.g. Genetics" /></div>

@@ -16,7 +16,7 @@ import 'katex/dist/katex.min.css';
 
 export default function LessonPage({ params }: { params: Promise<{ courseId: string; lessonId: string }> }) {
     const { courseId, lessonId } = use(params);
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const supabase = useSupabase();
     const { getSignal } = useAbortController();
     const [course, setCourse] = useState<CourseWithModules | null>(null);
@@ -36,6 +36,11 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
     const [quizAnswers, setQuizAnswers] = useState<Record<number, number | null>>({});
 
     useEffect(() => {
+        // Wait for auth to resolve before fetching. Section unlock status is
+        // keyed on the user's access — fetching with user?.id undefined returns
+        // everything locked, briefly showing paid content as locked to a
+        // student who owns it until auth resolves and this effect re-runs.
+        if (authLoading) return;
         const signal = getSignal();
         async function load() {
             try {
@@ -53,7 +58,7 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
             }
         }
         load();
-    }, [courseId, user?.id, supabase, getSignal]);
+    }, [courseId, authLoading, user?.id, supabase, getSignal]);
 
     // Find topic + navigation info
     const { topic, moduleName, moduleId, prevTopic, nextTopic, allTopics } = useMemo(() => {
