@@ -352,3 +352,83 @@
     font-size: var(--fs-xs);
     color: var(--text-secondary);
 }
+
+/* ═══ Mobile ═══ */
+@media (max-width: 768px) {
+    .test-topbar {
+        padding: var(--space-3) var(--space-4);
+        gap: var(--space-3);
+    }
+
+    .test-title {
+        display: none;
+    }
+
+    .test-timer {
+        font-size: var(--fs-lg);
+        padding: var(--space-1) var(--space-3);
+    }
+
+    /* Stack the question area and notes panel vertically */
+    .test-body {
+        flex-direction: column;
+        padding: var(--space-4);
+        gap: var(--space-4);
+    }
+
+    .test-notes-panel {
+        width: 100%;
+        position: static;
+        top: auto;
+    }
+
+    .test-question-stem {
+        font-size: var(--fs-base);
+        padding: var(--space-4);
+        margin-bottom: var(--space-5);
+    }
+
+    .test-option {
+        padding: var(--space-3) var(--space-4);
+        gap: var(--space-3);
+    }
+
+    .test-bottom-bar {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    /* Let the question-number grid scroll instead of overflowing */
+    .test-q-grid {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        justify-content: flex-start;
+        padding-bottom: var(--space-2);
+    }
+
+    .test-q-btn {
+        flex-shrink: 0;
+    }
+
+    .test-q-legend {
+        flex-wrap: wrap;
+        gap: var(--space-3);
+    }
+
+    /* Results page */
+    .test-results-card {
+        padding: var(--space-6);
+    }
+
+    .score-circle {
+        width: 140px;
+        height: 140px;
+    }
+
+    .results-breakdown {
+        gap: var(--space-2);
+    }
+
+    .results-stat {
+        padding: var(--space-3);
+    }
+}

@@ -38,6 +38,9 @@
     position: relative;
     flex: 1;
     max-width: 500px;
+    /* Allow the search field to shrink below its intrinsic width so the
+       notification/user buttons aren't pushed off-screen on mobile. */
+    min-width: 0;
 }
 
 .search-icon {

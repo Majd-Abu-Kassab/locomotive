@@ -28,7 +28,7 @@ export default function ContactPage() {
                     </div>
 
                     <form style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }} onSubmit={e => e.preventDefault()}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
                             <div className="input-group">
                                 <label>First Name</label>
                                 <input className="input" placeholder="John" />

@@ -992,18 +992,12 @@ tr:hover td {
 
 /* Responsive */
 @media (max-width: 768px) {
-  .sidebar {
-    display: none;
-  }
+  /* NOTE: sidebar/topbar/app-main mobile behavior is handled in their own
+     component stylesheets (Sidebar.css, Topbar.css, app-layout.css). Do not
+     force `display: none` on `.sidebar` here — it breaks the slide-in mobile
+     drawer. */
 
-  .main-content {
-    margin-left: 0 !important;
-  }
-
-  .topbar {
-    left: 0 !important;
-  }
-
+  .grid-2,
   .grid-3,
   .grid-4 {
     grid-template-columns: 1fr !important;
@@ -1043,5 +1037,25 @@ tr:hover td {
 
   .stat-value {
     font-size: var(--fs-xl);
+  }
+}
+
+/* Course detail page — stack the hero and free up room for lesson titles */
+@media (max-width: 640px) {
+  .course-hero {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: var(--space-4) !important;
+    padding: var(--space-5) !important;
+  }
+
+  .course-hero h1 {
+    font-size: var(--fs-2xl) !important;
+  }
+
+  /* Drop the "Interactive Quiz" style label so the lesson name isn't crushed
+     into one word per line — the question-count badge still shows */
+  .course-lesson-type {
+    display: none !important;
   }
 }

@@ -204,3 +204,44 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* ═══ Mobile ═══ */
+@media (max-width: 768px) {
+    /* Keep the 4 stat tiles as a compact 2×2 grid instead of one tall column.
+       Higher specificity + !important to beat the global `.grid-4 { 1fr }` rule. */
+    .dash-stats.grid-4 {
+        grid-template-columns: 1fr 1fr !important;
+        gap: var(--space-3);
+    }
+
+    /* Tighten the stat tiles so two fit comfortably side by side */
+    .dash-stats .stat-card {
+        padding: var(--space-4);
+    }
+
+    .dash-stats .stat-value {
+        font-size: var(--fs-xl);
+    }
+
+    .dash-stats .stat-label {
+        font-size: var(--fs-xs);
+    }
+
+    /* Section headers: let the "View All" link sit on its own line if needed */
+    .dash-section-header,
+    .dash-card-header {
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
+
+    .exam-breakdown {
+        gap: var(--space-4);
+    }
+}
+
+/* Very small phones: stat labels can get cramped — allow single column */
+@media (max-width: 360px) {
+    .dash-stats.grid-4 {
+        grid-template-columns: 1fr !important;
+    }
+}

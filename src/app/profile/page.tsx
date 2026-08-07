@@ -183,7 +183,7 @@ export default function ProfilePage() {
                         <User size={18} /> Personal Information
                     </h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 'var(--space-4)' }}>
                             <div className="input-group">
                                 <label>First Name</label>
                                 <input className="input" value={firstName} onChange={e => setFirstName(e.target.value)} />
@@ -220,7 +220,7 @@ export default function ProfilePage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
 
                         {/* Exam date + study hours */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 'var(--space-4)' }}>
                             <div className="input-group">
                                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
                                     <Calendar size={14} /> IMAT Exam Date
@@ -384,7 +384,7 @@ export default function ProfilePage() {
                             );
                         }
                         return (
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
                                 <div className="stat-card">
                                     <div className="stat-value">{paid.length}</div>
                                     <div className="stat-label">Payments</div>

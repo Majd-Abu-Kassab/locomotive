@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Mail, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
@@ -14,6 +14,29 @@ export default function LoginPage() {
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    // Surface messages the auth flow redirects here with (expired reset/callback
+    // link, inactivity logout). Read from the URL so we don't need a Suspense
+    // boundary the way useSearchParams() would.
+    const [notice, setNotice] = useState<{ type: 'error' | 'info'; text: string } | null>(null);
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const err = params.get('error');
+        const reason = params.get('reason');
+
+        let next: { type: 'error' | 'info'; text: string } | null = null;
+        if (err === 'auth_failed') {
+            next = { type: 'error', text: 'That sign-in or password reset link is invalid or has expired. Please request a new one.' };
+        } else if (reason === 'session_expired') {
+            next = { type: 'info', text: 'You were signed out due to inactivity. Please sign in again.' };
+        }
+
+        if (next) {
+            setNotice(next);
+            // Strip the query so the message clears on refresh and isn't re-shown.
+            window.history.replaceState(null, '', window.location.pathname);
+        }
+    }, []);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -48,6 +71,20 @@ export default function LoginPage() {
                     <h1>LOCOMOTIVE</h1>
                     <p>Your journey to medical school starts here</p>
                 </div>
+
+                {notice && (
+                    <div style={{
+                        padding: 'var(--space-3) var(--space-4)',
+                        background: notice.type === 'error' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(37, 99, 235, 0.12)',
+                        borderRadius: 'var(--radius-md)',
+                        border: `1px solid ${notice.type === 'error' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(37, 99, 235, 0.3)'}`,
+                        color: notice.type === 'error' ? 'var(--color-danger-light)' : 'var(--brand-accent-light)',
+                        fontSize: 'var(--fs-sm)',
+                        marginBottom: 'var(--space-4)',
+                    }}>
+                        {notice.text}
+                    </div>
+                )}
 
                 {error && (
                     <div style={{

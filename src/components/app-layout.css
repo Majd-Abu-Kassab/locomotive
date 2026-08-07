@@ -5,6 +5,10 @@
 
 .app-main {
     flex: 1;
+    /* Without min-width: 0 a flex item defaults to min-width: auto, so a wide
+       descendant (search input, horizontal scroll rows, long text) forces the
+       whole column wider than the viewport and the page overflows sideways. */
+    min-width: 0;
     margin-left: var(--sidebar-width);
     transition: margin-left var(--transition-base);
 }
@@ -12,6 +16,8 @@
 .app-content {
     margin-top: var(--topbar-height);
     min-height: calc(100vh - var(--topbar-height));
+    /* Safety net: never let page content spill horizontally on small screens */
+    overflow-x: hidden;
 }
 
 .mobile-overlay {

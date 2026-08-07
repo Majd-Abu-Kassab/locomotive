@@ -242,7 +242,7 @@ export default function SchedulePage() {
                             <label>Title</label>
                             <input className="input" placeholder="e.g., Biology Review" value={newEvent.title} onChange={e => setNewEvent({ ...newEvent, title: e.target.value })} />
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
                             <div className="input-group">
                                 <label>Type</label>
                                 <select className="select" value={newEvent.type} onChange={e => setNewEvent({ ...newEvent, type: e.target.value as 'study' | 'test' | 'dayoff' })}>

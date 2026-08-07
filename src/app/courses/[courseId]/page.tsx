@@ -119,7 +119,7 @@ export default function CourseDetailPage({ params }: { params: Promise<{ courseI
                 </Link>
 
                 {/* Course hero */}
-                <div style={{
+                <div className="course-hero" style={{
                     display: 'flex', alignItems: 'center', gap: 'var(--space-5)',
                     marginBottom: 'var(--space-6)', padding: 'var(--space-6)',
                     background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
@@ -270,6 +270,7 @@ export default function CourseDetailPage({ params }: { params: Promise<{ courseI
                                             <Link
                                                 href={`/courses/${courseId}/${topic.id}`}
                                                 key={topic.id}
+                                                className="course-topic-row"
                                                 style={{
                                                     display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
                                                     padding: 'var(--space-3) var(--space-4)',
@@ -287,7 +288,7 @@ export default function CourseDetailPage({ params }: { params: Promise<{ courseI
                                                     <Circle size={18} style={{ color: 'var(--text-tertiary)' }} />
                                                 )}
                                                 <span style={{ flex: 1 }}>{topic.name}</span>
-                                                <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', color: 'var(--text-tertiary)', fontSize: 'var(--fs-xs)' }}>
+                                                <span className="course-lesson-type" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', color: 'var(--text-tertiary)', fontSize: 'var(--fs-xs)' }}>
                                                     {lessonTypeIcon[topic.lesson_type]}
                                                     {lessonTypeLabel[topic.lesson_type]}
                                                 </span>

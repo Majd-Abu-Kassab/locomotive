@@ -105,7 +105,7 @@ export default function OrderHistoryPage() {
                 </div>
 
                 {/* Stats row */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
                     <div className="stat-card">
                         <div className="stat-icon" style={{ background: 'rgba(37,99,235,0.12)', color: 'var(--brand-accent-light)' }}>
                             <Receipt size={20} />

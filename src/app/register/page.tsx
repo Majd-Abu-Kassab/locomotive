@@ -121,7 +121,7 @@ export default function RegisterPage() {
                                 Sign up with Google
                             </button>
                             <div className="divider-text">or use email</div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 'var(--space-4)' }}>
                                 <div className="input-group">
                                     <label>First Name</label>
                                     <div style={{ position: 'relative' }}>
