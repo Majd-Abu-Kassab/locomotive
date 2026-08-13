@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Search, Bell, User, ChevronDown, LogOut, Settings, BookOpen, HelpCircle, X, Menu } from 'lucide-react';
+import { Search, Bell, User, ChevronDown, LogOut, Settings, BookOpen, HelpCircle, X, Menu, Sun, Moon } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourses, CourseWithModules, getNotifications, markNotificationAsRead, markAllNotificationsAsRead, NotificationRow } from '@/lib/api';
@@ -23,6 +24,7 @@ interface TopbarProps {
 
 export default function Topbar({ onMenuToggle }: TopbarProps) {
     const { profile, user, signOut } = useAuth();
+    const { theme, toggleTheme } = useTheme();
     const supabase = useSupabase();
     const { getSignal } = useAbortController();
     const [searchQuery, setSearchQuery] = useState('');
@@ -272,6 +274,10 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
                                 <Settings size={16} />
                                 <span>Profile Settings</span>
                             </Link>
+                            <button className="dropdown-item" onClick={toggleTheme} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 'inherit', color: 'inherit', textAlign: 'left' }}>
+                                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                                <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+                            </button>
                             <button className="dropdown-item" onClick={handleSignOut} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 'inherit', color: 'inherit', textAlign: 'left' }}>
                                 <LogOut size={16} />
                                 <span>Sign Out</span>

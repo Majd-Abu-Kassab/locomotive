@@ -8,7 +8,7 @@ import {
     AlertTriangle, Layers, Users, CreditCard, Tag, CheckCircle, XCircle,
     Gift, BarChart2, TrendingUp, TrendingDown, Activity, Award,
     Upload, FileText, Image as ImageIcon, Shield, UserCog, Search, Crown,
-    ArrowLeft, FolderTree, Video, FileQuestion, Bell, Send
+    ArrowLeft, FolderTree, Video, FileQuestion, Bell, Send, MessageSquare, Mail
 } from 'lucide-react';
 import { RichTextToolbar, RichTextPreview } from '@/components/RichTextEditor';
 import { useAuth } from '@/contexts/AuthContext';
@@ -29,10 +29,11 @@ import {
     getCourseSections,
     CourseWithModules, ModuleWithTopics, TopicWithProgress, QuestionRow, CourseSection, PaymentRow, CouponRow, StudentAccessRow,
     PlatformStats, SubjectPerformance, QuestionAnalytics, StudentSummary,
-    AdminRole, ADMIN_ROLE_LABELS, ADMIN_ROLE_DESCRIPTIONS, ROLE_PERMISSIONS, TeamMember, adminSendNotification
+    AdminRole, ADMIN_ROLE_LABELS, ADMIN_ROLE_DESCRIPTIONS, ROLE_PERMISSIONS, TeamMember, adminSendNotification,
+    adminGetSupportMessages, adminUpdateSupportMessageStatus, SupportMessageRow
 } from '@/lib/api';
 
-type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics' | 'team' | 'notifications';
+type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics' | 'team' | 'notifications' | 'support';
 
 export default function AdminPage() {
     const { profile, user, loading: authLoading } = useAuth();
@@ -115,6 +116,11 @@ export default function AdminPage() {
     // Notifications tab
     const [notificationPayload, setNotificationPayload] = useState({ title: '', message: '', type: 'system', link: '', targetUserId: 'all' });
     const [sendingNotification, setSendingNotification] = useState(false);
+
+    // Support tab
+    const [supportMessages, setSupportMessages] = useState<SupportMessageRow[]>([]);
+    const [supportFilter, setSupportFilter] = useState<'open' | 'all'>('open');
+    const [updatingSupportId, setUpdatingSupportId] = useState<string | null>(null);
 
     // Role-based permissions
     const userRole = profile?.admin_role as AdminRole | null;
@@ -218,6 +224,10 @@ export default function AdminPage() {
                 if (tab === 'team') {
                     const members = await adminGetTeamMembers(supabase, signal);
                     setTeamMembers(members);
+                }
+                if (tab === 'support') {
+                    const msgs = await adminGetSupportMessages(supabase, signal);
+                    setSupportMessages(msgs);
                 }
             } catch (err) {
                 // Always reset analytics loading flag — even on abort — so the
@@ -580,6 +590,7 @@ export default function AdminPage() {
                         { key: 'analytics', label: 'Analytics', icon: <BarChart2 size={14} /> },
                         { key: 'team', label: 'Team', icon: <UserCog size={14} /> },
                         { key: 'notifications', label: 'Notifications', icon: <Bell size={14} /> },
+                        { key: 'support', label: `Support${supportMessages.some(m => m.status === 'open') ? ` (${supportMessages.filter(m => m.status === 'open').length})` : ''}`, icon: <MessageSquare size={14} /> },
                     ] as { key: Tab; label: string; icon: React.ReactNode }[]).filter(t => canSeeTab(t.key)).map(t => (
                         <button key={t.key} className={`admin-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
                             <span style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }}>{t.icon}</span>{t.label}
@@ -1279,14 +1290,25 @@ export default function AdminPage() {
                             )}
                             <div>
                                 <label style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', marginBottom: 'var(--space-2)', display: 'block' }}>Options (click letter = correct)</label>
-                                {(editingQuestion.options || ['', '', '', '', '']).map((opt, i) => (
-                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                                {(editingQuestion.options || ['', '', '', '', '']).map((opt, i) => {
+                                    const optStr = typeof opt === 'string' ? opt : '';
+                                    return (
+                                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
                                         <button onClick={() => setEditingQuestion({ ...editingQuestion, correct_answer: i })} style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: editingQuestion.correct_answer === i ? 'var(--color-success)' : 'var(--bg-glass)', border: `1px solid ${editingQuestion.correct_answer === i ? 'var(--color-success)' : 'var(--border-primary)'}`, color: editingQuestion.correct_answer === i ? 'white' : 'var(--text-secondary)', cursor: 'pointer', fontSize: 'var(--fs-xs)', fontWeight: 600 }}>
                                             {String.fromCharCode(65 + i)}
                                         </button>
-                                        <input className="input" value={typeof opt === 'string' ? opt : ''} onChange={e => { const newOpts = [...(editingQuestion.options || ['', '', '', '', ''])]; newOpts[i] = e.target.value; setEditingQuestion({ ...editingQuestion, options: newOpts }); }} placeholder={`Option ${String.fromCharCode(65 + i)}`} style={{ flex: 1 }} />
+                                        <div style={{ flex: 1 }}>
+                                            <input className="input" value={optStr} onChange={e => { const newOpts = [...(editingQuestion.options || ['', '', '', '', ''])]; newOpts[i] = e.target.value; setEditingQuestion({ ...editingQuestion, options: newOpts }); }} placeholder={`Option ${String.fromCharCode(65 + i)} — supports $math$`} style={{ width: '100%' }} />
+                                            {optStr.includes('$') && (
+                                                <div style={{ padding: '4px 8px', marginTop: 4, background: 'var(--bg-glass)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-sm)' }}>
+                                                    <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-tertiary)', marginRight: 6 }}>Preview:</span>
+                                                    <RichTextPreview text={optStr} />
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                             <div className="input-group">
                                 <label>Explanation</label>
@@ -1740,6 +1762,77 @@ export default function AdminPage() {
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* ===== SUPPORT TAB ===== */}
+            {tab === 'support' && canSeeTab('support') && (
+                <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-5)', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+                        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                            {(['open', 'all'] as const).map(f => (
+                                <button key={f} className={`btn btn-sm ${supportFilter === f ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSupportFilter(f)}>
+                                    {f === 'open' ? 'Open' : 'All'}
+                                </button>
+                            ))}
+                        </div>
+                        <span className="text-sm text-secondary">
+                            {supportMessages.filter(m => m.status === 'open').length} open · {supportMessages.length} total
+                        </span>
+                    </div>
+
+                    {(() => {
+                        const visible = supportMessages.filter(m => supportFilter === 'all' || m.status === 'open');
+                        if (visible.length === 0) {
+                            return (
+                                <div className="card" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
+                                    <MessageSquare size={32} style={{ color: 'var(--text-tertiary)', marginBottom: 'var(--space-3)' }} />
+                                    <p className="text-secondary">{supportFilter === 'open' ? 'No open messages — all caught up! 🎉' : 'No support messages yet.'}</p>
+                                </div>
+                            );
+                        }
+                        return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                                {visible.map(m => {
+                                    const name = [m.first_name, m.last_name].filter(Boolean).join(' ') || 'Anonymous';
+                                    return (
+                                        <div key={m.id} className="card" style={{ opacity: m.status === 'resolved' ? 0.65 : 1 }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)', flexWrap: 'wrap', marginBottom: 'var(--space-2)' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                                                    <span className="badge badge-accent">{m.subject}</span>
+                                                    <span className={`badge ${m.status === 'open' ? 'badge-warning' : 'badge-success'}`}>{m.status}</span>
+                                                </div>
+                                                <span className="text-xs text-secondary">{new Date(m.created_at).toLocaleString()}</span>
+                                            </div>
+                                            <div style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: 2 }}>{name}</div>
+                                            <div className="text-xs text-secondary" style={{ marginBottom: 'var(--space-3)' }}>{m.email}</div>
+                                            <p style={{ fontSize: 'var(--fs-sm)', whiteSpace: 'pre-wrap', marginBottom: 'var(--space-4)' }}>{m.message}</p>
+                                            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                                                <a className="btn btn-secondary btn-sm" href={`mailto:${m.email}?subject=${encodeURIComponent('Re: ' + m.subject)}`}>
+                                                    <Mail size={14} /> Reply
+                                                </a>
+                                                <button
+                                                    className={`btn btn-sm ${m.status === 'open' ? 'btn-primary' : 'btn-ghost'}`}
+                                                    disabled={updatingSupportId === m.id}
+                                                    onClick={async () => {
+                                                        const next = m.status === 'open' ? 'resolved' : 'open';
+                                                        setUpdatingSupportId(m.id);
+                                                        const { error } = await adminUpdateSupportMessageStatus(supabase, m.id, next);
+                                                        setUpdatingSupportId(null);
+                                                        if (error) { addToast('Could not update status.', 'error'); return; }
+                                                        setSupportMessages(prev => prev.map(x => x.id === m.id ? { ...x, status: next, resolved_at: next === 'resolved' ? new Date().toISOString() : null } : x));
+                                                        addToast(next === 'resolved' ? 'Marked resolved.' : 'Reopened.', 'success');
+                                                    }}
+                                                >
+                                                    {updatingSupportId === m.id ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : (m.status === 'open' ? <><CheckCircle size={14} /> Mark resolved</> : 'Reopen')}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })()}
                 </div>
             )}
 

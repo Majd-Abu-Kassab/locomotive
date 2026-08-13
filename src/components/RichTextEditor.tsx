@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { Bold, Italic, Subscript, Superscript, Image, Type, Code } from 'lucide-react';
+import katex from 'katex';
+import { Bold, Italic, Subscript, Superscript, Image, Code, Radical } from 'lucide-react';
 
 interface RichTextToolbarProps {
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -12,10 +13,14 @@ interface RichTextToolbarProps {
 
 /**
  * Formatting toolbar that inserts markdown-like syntax into a textarea.
- * 
+ *
  * Supported syntax (rendered by RichTextPreview):
  *   **bold**   *italic*   ^{superscript}   _{subscript}
- *   $LaTeX math$   ![alt](url)
+ *   $inline math$   $$display math$$   ![alt](url)
+ *
+ * Math is LaTeX rendered by KaTeX. Use $$...$$ for large standalone
+ * equations (centered, full-size fractions) and $...$ for math inline in a
+ * sentence.
  */
 export function RichTextToolbar({ textareaRef, value, onChange, onImageUpload }: RichTextToolbarProps) {
     const fileRef = useRef<HTMLInputElement>(null);
@@ -80,13 +85,22 @@ export function RichTextToolbar({ textareaRef, value, onChange, onImageUpload }:
                 <Subscript size={14} />
             </button>
             <div style={{ width: 1, height: 20, background: 'var(--border-primary)', margin: '0 2px' }} />
-            <button type="button" title="Math equation $...$" style={btnStyle} onClick={() => wrapSelection('$', '$')}>
+            <button type="button" title="Inline math $...$" style={btnStyle} onClick={() => wrapSelection('$', '$')}>
                 <span style={{ fontFamily: 'serif', fontStyle: 'italic', fontSize: 14, fontWeight: 700 }}>∑</span>
             </button>
-            <button type="button" title="Fraction" style={btnStyle} onClick={() => wrapSelection('$\\frac{', '}{denominator}$')}>
+            <button type="button" title="Display equation (large, centered) $$...$$" style={btnStyle} onClick={() => wrapSelection('$$', '$$')}>
+                <span style={{ fontFamily: 'serif', fontStyle: 'italic', fontSize: 11, fontWeight: 700 }}>∑∑</span>
+            </button>
+            <button type="button" title="Fraction  $\frac{a}{b}$" style={btnStyle} onClick={() => wrapSelection('$\\frac{', '}{b}$')}>
                 <span style={{ fontSize: 10, fontWeight: 600 }}>a/b</span>
             </button>
-            <button type="button" title="Chemical formula" style={btnStyle} onClick={() => wrapSelection('$\\text{', '}$')}>
+            <button type="button" title="Exponent / power  a^{n}" style={btnStyle} onClick={() => wrapSelection('^{', '}')}>
+                <span style={{ fontSize: 11, fontWeight: 600 }}>xⁿ</span>
+            </button>
+            <button type="button" title="Square root  $\sqrt{x}$" style={btnStyle} onClick={() => wrapSelection('$\\sqrt{', '}$')}>
+                <Radical size={14} />
+            </button>
+            <button type="button" title="Chemical formula / plain text in math  $\text{...}$" style={btnStyle} onClick={() => wrapSelection('$\\text{', '}$')}>
                 <Code size={14} />
             </button>
             <div style={{ width: 1, height: 20, background: 'var(--border-primary)', margin: '0 2px' }} />
@@ -107,19 +121,27 @@ export function RichTextToolbar({ textareaRef, value, onChange, onImageUpload }:
                 onChange={handleImageUpload}
             />
             <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-tertiary)' }}>
-                Supports: **bold** *italic* ^{'{sup}'} _{'{sub}'} $math$ ![img](url)
+                $inline$ · $$big$$ · **bold** · ^{'{sup}'} _{'{sub}'}
             </span>
         </div>
     );
 }
 
+// Render a LaTeX string to KaTeX HTML, falling back to the raw source on error.
+function renderMath(content: string, displayMode: boolean, key: number): React.ReactNode {
+    try {
+        const html = katex.renderToString(content, { throwOnError: false, displayMode });
+        return <span key={key} dangerouslySetInnerHTML={{ __html: html }} />;
+    } catch {
+        return <code key={key} style={{ color: 'var(--color-warning)' }}>{displayMode ? `$$${content}$$` : `$${content}$`}</code>;
+    }
+}
+
 /**
  * Renders rich text with formatting:
- *   **bold**  →  <strong>
- *   *italic*  →  <em>
- *   ^{text}   →  <sup>
- *   _{text}   →  <sub>
- *   $math$    →  KaTeX rendered
+ *   **bold**  →  <strong>          *italic*  →  <em>
+ *   ^{text}   →  <sup>             _{text}   →  <sub>
+ *   $math$    →  KaTeX inline      $$math$$  →  KaTeX display (centered)
  *   ![alt](url) → <img>
  */
 export function RichTextPreview({ text }: { text: string }) {
@@ -127,60 +149,49 @@ export function RichTextPreview({ text }: { text: string }) {
 
     const renderRichText = (input: string): React.ReactNode[] => {
         const nodes: React.ReactNode[] = [];
-        // Combined regex for all supported patterns
-        const regex = /(\$[^$]+\$)|(!\[([^\]]*)\]\(([^)]+)\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\^\{[^}]+\})|(\_\{[^}]+\})/g;
+        // Order matters: $$display$$ must be tried before $inline$.
+        const regex = /(\$\$[^$]+\$\$)|(\$[^$]+\$)|(!\[([^\]]*)\]\(([^)]+)\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\^\{[^}]+\})|(_\{[^}]+\})/g;
         let lastIndex = 0;
         let match;
         let key = 0;
 
         while ((match = regex.exec(input)) !== null) {
-            // Text before match
             if (match.index > lastIndex) {
                 nodes.push(input.substring(lastIndex, match.index));
             }
 
             if (match[1]) {
-                // $math$ — render with KaTeX
-                const mathContent = match[1].slice(1, -1);
-                try {
-                    // eslint-disable-next-line @typescript-eslint/no-require-imports
-                    const katex = require('katex');
-                    const html = katex.renderToString(mathContent, { throwOnError: false, displayMode: false });
-                    nodes.push(<span key={key++} dangerouslySetInnerHTML={{ __html: html }} />);
-                } catch {
-                    nodes.push(<code key={key++} style={{ color: 'var(--color-warning)' }}>{match[1]}</code>);
-                }
+                // $$display math$$
+                nodes.push(renderMath(match[1].slice(2, -2), true, key++));
             } else if (match[2]) {
+                // $inline math$
+                nodes.push(renderMath(match[2].slice(1, -1), false, key++));
+            } else if (match[3]) {
                 // ![alt](url)
                 nodes.push(
                     <img
                         key={key++}
-                        src={match[4]}
-                        alt={match[3] || 'diagram'}
+                        src={match[5]}
+                        alt={match[4] || 'diagram'}
                         style={{
                             maxWidth: '100%', borderRadius: 'var(--radius-md)',
                             margin: 'var(--space-2) 0', display: 'block',
                         }}
                     />
                 );
-            } else if (match[5]) {
-                // **bold**
-                nodes.push(<strong key={key++}>{match[5].slice(2, -2)}</strong>);
             } else if (match[6]) {
-                // *italic*
-                nodes.push(<em key={key++}>{match[6].slice(1, -1)}</em>);
+                nodes.push(<strong key={key++}>{match[6].slice(2, -2)}</strong>);
             } else if (match[7]) {
-                // ^{superscript}
-                nodes.push(<sup key={key++}>{match[7].slice(2, -1)}</sup>);
+                nodes.push(<em key={key++}>{match[7].slice(1, -1)}</em>);
             } else if (match[8]) {
-                // _{subscript}
-                nodes.push(<sub key={key++}>{match[8].slice(2, -1)}</sub>);
+                nodes.push(<sup key={key++}>{match[8].slice(2, -1)}</sup>);
+            } else if (match[9]) {
+                nodes.push(<sub key={key++}>{match[9].slice(2, -1)}</sub>);
             }
 
             lastIndex = match.index + match[0].length;
         }
 
-        // Remaining text
         if (lastIndex < input.length) {
             nodes.push(input.substring(lastIndex));
         }

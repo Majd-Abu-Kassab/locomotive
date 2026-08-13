@@ -654,7 +654,7 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                                                 }}>
                                                     {String.fromCharCode(65 + i)}
                                                 </span>
-                                                <span>{optLabel}</span>
+                                                <span><RichTextPreview text={String(optLabel)} /></span>
                                             </button>
                                         );
                                     })}

@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { saveTestResult, saveTestAnswers, QuestionRow, getQuestions } from '@/lib/api';
+import { RichTextPreview } from '@/components/RichTextEditor';
 import './test-sim.css';
 
 type AnswerState = { [qIndex: number]: number | null };
@@ -275,17 +276,17 @@ export default function TestSimulationPage() {
                                             {i + 1}
                                         </span>
                                         <div style={{ flex: 1 }}>
-                                            <p style={{ fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-2)' }}>{question.stem}</p>
+                                            <p style={{ fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-2)' }}><RichTextPreview text={question.stem} /></p>
                                             <p style={{ fontSize: 'var(--fs-xs)', color: isCorrect ? 'var(--color-success)' : 'var(--color-danger)' }}>
                                                 {userAnswer === null || userAnswer === undefined
                                                     ? 'Unanswered'
-                                                    : isCorrect ? '✓ Correct' : `✗ Your answer: ${question.options[userAnswer!]}`}
+                                                    : isCorrect ? '✓ Correct' : <>✗ Your answer: <RichTextPreview text={String(question.options[userAnswer!])} /></>}
                                             </p>
                                             {!isCorrect && <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-success)', marginTop: '2px' }}>
-                                                Correct: {question.options[question.correct_answer]}
+                                                Correct: <RichTextPreview text={String(question.options[question.correct_answer])} />
                                             </p>}
                                             <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)', fontStyle: 'italic' }}>
-                                                {question.explanation}
+                                                <RichTextPreview text={question.explanation || ''} />
                                             </p>
                                         </div>
                                     </div>
@@ -358,7 +359,7 @@ export default function TestSimulationPage() {
                         </div>
                     </div>
 
-                    <div className="test-question-stem">{q.stem}</div>
+                    <div className="test-question-stem"><RichTextPreview text={q.stem} /></div>
 
                     <div className="test-options">
                         {q.options.map((opt, i) => (
@@ -368,7 +369,7 @@ export default function TestSimulationPage() {
                                 onClick={() => selectAnswer(currentQ, i)}
                             >
                                 <span className="test-option-letter">{String.fromCharCode(65 + i)}</span>
-                                <span>{typeof opt === 'string' && opt.match(/^[A-E]\) /) ? opt.substring(3) : opt}</span>
+                                <span><RichTextPreview text={typeof opt === 'string' && opt.match(/^[A-E]\) /) ? opt.substring(3) : String(opt)} /></span>
                             </button>
                         ))}
                     </div>

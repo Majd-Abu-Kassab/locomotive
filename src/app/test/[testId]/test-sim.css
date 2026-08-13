@@ -11,7 +11,7 @@
     align-items: center;
     justify-content: space-between;
     padding: var(--space-3) var(--space-6);
-    background: rgba(2, 14, 31, 0.95);
+    background: var(--bg-test-bar);
     backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border-primary);
     position: sticky;
@@ -164,7 +164,7 @@
 /* Bottom Bar */
 .test-bottom-bar {
     padding: var(--space-4) var(--space-6);
-    background: rgba(2, 14, 31, 0.95);
+    background: var(--bg-test-bar);
     backdrop-filter: blur(12px);
     border-top: 1px solid var(--border-primary);
     position: sticky;

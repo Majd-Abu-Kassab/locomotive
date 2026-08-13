@@ -106,6 +106,61 @@
   --sidebar-width: 260px;
   --sidebar-collapsed-width: 72px;
   --topbar-height: 64px;
+
+  /* Translucent bar backgrounds — overridden in the light theme */
+  --bg-topbar: rgba(2, 14, 31, 0.8);
+  --bg-test-bar: rgba(2, 14, 31, 0.95);
+
+  color-scheme: dark;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LIGHT THEME — soft off-white. Activated by data-theme="light"
+   on <html>. Only surface/text/border tokens flip; brand accents
+   (blue) stay the same and work on both.
+   ═══════════════════════════════════════════════════════════ */
+:root[data-theme="light"] {
+  --bg-primary: #eef1f6;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-glass: rgba(15, 23, 42, 0.03);
+  --bg-glass-hover: rgba(15, 23, 42, 0.06);
+  --bg-input: #ffffff;
+  --bg-sidebar: #ffffff;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #94a3b8;
+  --text-accent: #2563eb;
+  --text-inverse: #ffffff;
+
+  --border-primary: rgba(15, 23, 42, 0.10);
+  --border-secondary: rgba(15, 23, 42, 0.06);
+  --border-accent: rgba(37, 99, 235, 0.35);
+  --border-focus: #2563eb;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.10);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.12);
+  --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.15);
+  --shadow-glow: 0 0 20px rgba(37, 99, 235, 0.12);
+  --shadow-glow-lg: 0 0 40px rgba(37, 99, 235, 0.15);
+
+  --bg-topbar: rgba(255, 255, 255, 0.82);
+  --bg-test-bar: rgba(255, 255, 255, 0.92);
+
+  color-scheme: light;
+}
+
+/* Gradient wordmarks use a white start colour that vanishes on light
+   surfaces — swap to a blue gradient in the light theme. */
+:root[data-theme="light"] .logo-text,
+:root[data-theme="light"] .auth-card .logo-section h1 {
+  background: linear-gradient(135deg, var(--brand-accent-dark), var(--brand-accent-light));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 /* Reset & Base */

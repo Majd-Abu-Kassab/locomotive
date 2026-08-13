@@ -974,11 +974,11 @@ export const ADMIN_ROLE_DESCRIPTIONS: Record<AdminRole, string> = {
 
 // Which admin tabs each role can see
 export const ROLE_PERMISSIONS: Record<AdminRole, string[]> = {
-    super_admin: ['courses', 'questions', 'sections', 'students', 'finance', 'analytics', 'team'],
+    super_admin: ['courses', 'questions', 'sections', 'students', 'finance', 'analytics', 'team', 'notifications', 'support'],
     content_manager: ['courses', 'questions', 'sections'],
     finance_manager: ['finance', 'students'],
     analyst: ['analytics'],
-    support: ['students', 'finance'],
+    support: ['students', 'finance', 'support'],
 };
 
 export interface TeamMember {
@@ -1032,6 +1032,71 @@ export async function adminFindUserByEmail(supabase: SupabaseClient, email: stri
 
     if (error || !data) return null;
     return data;
+}
+
+// ===== SUPPORT MESSAGES =====
+export interface SupportMessageRow {
+    id: string;
+    user_id: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    email: string;
+    subject: string;
+    message: string;
+    status: 'open' | 'resolved';
+    created_at: string;
+    resolved_at: string | null;
+}
+
+// Submit a contact-support message. Works for logged-out visitors too (the
+// RLS insert policy allows anyone); user_id is attached when available.
+export async function submitSupportMessage(
+    supabase: SupabaseClient,
+    payload: {
+        user_id?: string | null;
+        first_name?: string | null;
+        last_name?: string | null;
+        email: string;
+        subject: string;
+        message: string;
+    }
+): Promise<{ error: Error | null }> {
+    const { error } = await supabase.from('support_messages').insert({
+        user_id: payload.user_id ?? null,
+        first_name: payload.first_name ?? null,
+        last_name: payload.last_name ?? null,
+        email: payload.email,
+        subject: payload.subject,
+        message: payload.message,
+    });
+    return { error: error ? new Error(error.message) : null };
+}
+
+export async function adminGetSupportMessages(supabase: SupabaseClient, signal?: AbortSignal): Promise<SupportMessageRow[]> {
+    const { data, error } = await supabase
+        .from('support_messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .abortSignal(signal!);
+
+    if (error) {
+        throwIfAborted(error, signal);
+        console.error('Error fetching support messages:', error);
+        return [];
+    }
+    return (data || []) as SupportMessageRow[];
+}
+
+export async function adminUpdateSupportMessageStatus(
+    supabase: SupabaseClient,
+    id: string,
+    status: 'open' | 'resolved'
+): Promise<{ error: Error | null }> {
+    const { error } = await supabase
+        .from('support_messages')
+        .update({ status, resolved_at: status === 'resolved' ? new Date().toISOString() : null })
+        .eq('id', id);
+    return { error: error ? new Error(error.message) : null };
 }
 
 // ===== NOTIFICATIONS =====
