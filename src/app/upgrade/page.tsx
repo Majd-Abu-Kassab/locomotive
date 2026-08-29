@@ -11,7 +11,7 @@ import { useToast } from '@/components/Toast';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import {
-    getCourses, getCourseSections, validateCoupon, createPaymentRecord,
+    getCourses, getCourseSections, validateCoupon,
     CourseWithModules, CourseSection,
 } from '@/lib/api';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
@@ -33,8 +33,6 @@ function PayPalCheckoutButtons({
     onSuccess: () => void;
     onError: (msg: string) => void;
 }) {
-    const supabase = useSupabase();
-
     return (
         <PayPalScriptProvider
             options={{
@@ -71,19 +69,9 @@ function PayPalCheckoutButtons({
                             throw new Error('No orderId: ' + JSON.stringify(data));
                         }
 
-                        // Create pending payment record using server-computed values
-                        await createPaymentRecord(supabase, {
-                            // user_id will be resolved from session server-side;
-                            // we pass a placeholder here and the capture route will use the verified user
-                            user_id: '',  // filled in by server via session
-                            section_id: sectionId,
-                            amount: data.finalPrice,
-                            currency: sectionCurrency,
-                            paypal_order_id: data.orderId,
-                            coupon_id: data.couponId || null,
-                            discount_amount: data.discountAmount || 0,
-                        });
-
+                        // The capture route is the single source of truth: it
+                        // creates the paid payment record (with the verified
+                        // session user) and grants course access.
                         return data.orderId;
                     }}
                     onApprove={async (data) => {

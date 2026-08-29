@@ -172,6 +172,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const signOut = async () => {
+        // Release our single-session marker so a later sign-in on this browser
+        // isn't prompted. Only clear it if it's still ours (match on the id) so
+        // we never wipe another device's active claim.
+        try {
+            const local = typeof window !== 'undefined' ? localStorage.getItem('loco_session_id') : null;
+            if (user && local) {
+                await supabase
+                    .from('profiles')
+                    .update({ active_session_id: null, session_last_seen: null })
+                    .eq('id', user.id)
+                    .eq('active_session_id', local);
+            }
+            if (typeof window !== 'undefined') localStorage.removeItem('loco_session_id');
+        } catch {
+            // best-effort — don't block sign-out on marker cleanup
+        }
         await supabase.auth.signOut();
         setUser(null);
         setProfile(null);

@@ -4,6 +4,7 @@ import { SupabaseProvider } from "@/contexts/SupabaseContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ToastProvider } from "@/components/Toast";
+import SingleSessionGuard from "@/components/SingleSessionGuard";
 import { Analytics } from "@vercel/analytics/react";
 import "katex/dist/katex.min.css";
 import "./globals.css";
@@ -30,7 +31,10 @@ export default async function RootLayout({
         <ThemeProvider initialTheme={theme}>
           <SupabaseProvider>
             <AuthProvider>
-              <ToastProvider>{children}</ToastProvider>
+              <ToastProvider>
+                <SingleSessionGuard />
+                {children}
+              </ToastProvider>
             </AuthProvider>
           </SupabaseProvider>
         </ThemeProvider>

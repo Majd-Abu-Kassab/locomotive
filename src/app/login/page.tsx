@@ -29,6 +29,8 @@ export default function LoginPage() {
             next = { type: 'error', text: 'That sign-in or password reset link is invalid or has expired. Please request a new one.' };
         } else if (reason === 'session_expired') {
             next = { type: 'info', text: 'You were signed out due to inactivity. Please sign in again.' };
+        } else if (reason === 'signed_in_elsewhere') {
+            next = { type: 'info', text: 'You were signed out because your account was signed in on another device.' };
         }
 
         if (next) {
