@@ -18,7 +18,7 @@ import { isAbortError } from '@/hooks/useAbortController';
 import {
     getCourses, getAllQuestions,
     adminSaveCourse, adminDeleteCourse,
-    adminSaveQuestion, adminDeleteQuestion,
+    adminSaveQuestion, adminDeleteQuestion, adminBulkImportQuestions,
     adminSaveSection, adminDeleteSection, adminAssignModulesToSection, adminUpdateCoursePaymentSettings,
     adminGetAllStudentAccess, adminGrantAccess, adminRevokeAccess,
     adminGetAllPayments, adminGetCoupons, adminSaveCoupon, adminToggleCoupon,
@@ -34,6 +34,69 @@ import {
 } from '@/lib/api';
 
 type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics' | 'team' | 'notifications' | 'support';
+
+// ── JSON question-import helpers ──
+interface ParsedItem { topic: string; stem: string; options: string[]; correct: number; explanation: string; }
+
+// Explanations sometimes arrive as HTML; convert to clean text so the
+// markdown/LaTeX renderer displays them correctly (we never store raw HTML).
+function stripHtml(input: string): string {
+    if (!input) return '';
+    return input
+        .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+        .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
+        .replace(/<li[^>]*>/gi, '• ')
+        // Remove only recognized HTML tags — leave stray < > alone so math
+        // like "x < 5" in an explanation isn't mangled.
+        .replace(/<\/?(p|div|span|ul|ol|b|i|strong|em|u|a|blockquote|code|pre|table|tbody|thead|td|th|h[1-6]|img|figure|figcaption)(\s[^>]*)?\/?>/gi, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function slugify(s: string): string {
+    return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'q';
+}
+
+// Parse an uploaded JSON file into validated question items. Accepts an array
+// of quizzes ([{ quiz_title, questions: [...] }]) or a single quiz object.
+function parseQuestionJson(text: string): { items: ParsedItem[]; errors: string[] } {
+    const errors: string[] = [];
+    const items: ParsedItem[] = [];
+    let data: unknown;
+    try {
+        data = JSON.parse(text);
+    } catch (e) {
+        return { items: [], errors: ['Invalid JSON — check the file. ' + (e as Error).message] };
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const quizzes: any[] = Array.isArray(data) ? data : [data];
+    quizzes.forEach((quiz, qi) => {
+        const topic = String(quiz?.quiz_title || quiz?.title || 'Imported').trim() || 'Imported';
+        const qs = Array.isArray(quiz?.questions) ? quiz.questions : (Array.isArray(quiz) ? quiz : null);
+        if (!qs) { errors.push(`Quiz ${qi + 1}: missing a "questions" array`); return; }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        qs.forEach((q: any, i: number) => {
+            const label = q?.title ? `"${q.title}"` : `Quiz ${qi + 1} Q${i + 1}`;
+            const stem = String(q?.content ?? q?.stem ?? '').trim();
+            const options = Array.isArray(q?.options) ? q.options.map((o: unknown) => String(o)) : [];
+            const correct = Number(q?.correct ?? q?.correct_answer);
+            if (!stem) { errors.push(`${label}: missing question text`); return; }
+            if (options.length < 2) { errors.push(`${label}: needs at least 2 options`); return; }
+            if (!Number.isInteger(correct) || correct < 0 || correct >= options.length) {
+                errors.push(`${label}: "correct" index ${q?.correct} is out of range (0–${options.length - 1})`);
+                return;
+            }
+            items.push({ topic, stem, options, correct, explanation: stripHtml(String(q?.explanation ?? '')) });
+        });
+    });
+    return { items, errors };
+}
 
 export default function AdminPage() {
     const { profile, user, loading: authLoading } = useAuth();
@@ -67,6 +130,16 @@ export default function AdminPage() {
     const [questionFilter, setQuestionFilter] = useState('');
     const stemRef = useRef<HTMLTextAreaElement>(null);
     const explanationRef = useRef<HTMLTextAreaElement>(null);
+
+    // JSON import
+    const [importOpen, setImportOpen] = useState(false);
+    const [importSubject, setImportSubject] = useState('');
+    const [importSource, setImportSource] = useState('locomotive-original');
+    const [importDifficulty, setImportDifficulty] = useState('medium');
+    const [importItems, setImportItems] = useState<ParsedItem[]>([]);
+    const [importErrors, setImportErrors] = useState<string[]>([]);
+    const [importFileName, setImportFileName] = useState('');
+    const [importing, setImporting] = useState(false);
 
     // Content upload state
     const [uploadingContent, setUploadingContent] = useState(false);
@@ -395,6 +468,49 @@ export default function AdminPage() {
             addToast('Question deleted', 'success');
             setQuestions(prev => prev.filter(q => q.id !== qId));
         }
+    };
+
+    const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setImportFileName(file.name);
+        try {
+            const text = await file.text();
+            const { items, errors } = parseQuestionJson(text);
+            setImportItems(items);
+            setImportErrors(errors);
+        } catch {
+            setImportItems([]);
+            setImportErrors(['Could not read the file.']);
+        }
+    };
+
+    const handleRunImport = async () => {
+        if (!importSubject.trim()) { addToast('Enter a subject for these questions.', 'warning'); return; }
+        if (importItems.length === 0) { addToast('No valid questions to import.', 'warning'); return; }
+        setImporting(true);
+        const rows = importItems.map((it, i) => ({
+            id: `imp-${slugify(importSubject)}-${slugify(it.topic)}-${i + 1}-${Math.random().toString(36).slice(2, 6)}`,
+            subject: importSubject.trim(),
+            topic: it.topic,
+            difficulty: importDifficulty,
+            stem: it.stem,
+            options: it.options,
+            correct_answer: it.correct,
+            explanation: it.explanation,
+            source: importSource,
+            year: null,
+        }));
+        const { imported, error } = await adminBulkImportQuestions(supabase, rows);
+        setImporting(false);
+        if (error) { addToast('Import failed: ' + error.message, 'error'); return; }
+        addToast(`Imported ${imported} question${imported !== 1 ? 's' : ''}.`, 'success');
+        const all = await getAllQuestions(supabase);
+        setQuestions(all);
+        setImportOpen(false);
+        setImportItems([]);
+        setImportErrors([]);
+        setImportFileName('');
     };
 
     const handleQuestionImageUpload = async (file: File): Promise<string | null> => {
@@ -821,9 +937,14 @@ export default function AdminPage() {
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
                             <input className="input" placeholder="Filter by subject, topic, or keyword..." value={questionFilter} onChange={e => setQuestionFilter(e.target.value)} style={{ maxWidth: 400 }} />
-                            <button className="btn btn-primary btn-sm" onClick={() => setEditingQuestion({ id: '', subject: '', topic: '', difficulty: 'medium', stem: '', options: ['A) ', 'B) ', 'C) ', 'D) ', 'E) '], correct_answer: 0, explanation: '', source: 'locomotive-original', year: null })}>
-                                <Plus size={14} /> Add Question
-                            </button>
+                            <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+                                <button className="btn btn-secondary btn-sm" onClick={() => setImportOpen(true)}>
+                                    <Upload size={14} /> Import JSON
+                                </button>
+                                <button className="btn btn-primary btn-sm" onClick={() => setEditingQuestion({ id: '', subject: '', topic: '', difficulty: 'medium', stem: '', options: ['A) ', 'B) ', 'C) ', 'D) ', 'E) '], correct_answer: 0, explanation: '', source: 'locomotive-original', year: null })}>
+                                    <Plus size={14} /> Add Question
+                                </button>
+                            </div>
                         </div>
                         <div className="table-wrapper">
                             <table>
@@ -1833,6 +1954,79 @@ export default function AdminPage() {
                             </div>
                         );
                     })()}
+                </div>
+            )}
+
+            {/* ===== IMPORT QUESTIONS MODAL ===== */}
+            {importOpen && (
+                <div className="modal-overlay" onClick={() => !importing && setImportOpen(false)}>
+                    <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+                            <h2 style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>Import Questions from JSON</h2>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setImportOpen(false)} disabled={importing}><X size={16} /></button>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+                            <div className="input-group">
+                                <label>Subject *</label>
+                                <input className="input" placeholder="e.g. Mathematics" value={importSubject} onChange={e => setImportSubject(e.target.value)} />
+                            </div>
+                            <div className="input-group">
+                                <label>Source</label>
+                                <select className="select" value={importSource} onChange={e => setImportSource(e.target.value)}>
+                                    <option value="official-imat">Official IMAT</option>
+                                    <option value="locomotive-original">LOCOMOTIVE Original</option>
+                                    <option value="italian-medical">Italian Medical</option>
+                                </select>
+                            </div>
+                            <div className="input-group">
+                                <label>Difficulty</label>
+                                <select className="select" value={importDifficulty} onChange={e => setImportDifficulty(e.target.value)}>
+                                    <option value="easy">Easy</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="hard">Hard</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <p className="text-xs text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
+                            Subject, source, and difficulty apply to every question in the file. Each quiz&apos;s <code>quiz_title</code> becomes the topic. HTML in explanations is converted to plain text.
+                        </p>
+
+                        <input
+                            type="file"
+                            accept=".json,application/json"
+                            onChange={handleImportFile}
+                            style={{ display: 'block', marginBottom: 'var(--space-3)', fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)' }}
+                        />
+
+                        {(importItems.length > 0 || importErrors.length > 0) && (
+                            <div style={{ background: 'var(--bg-glass)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)', marginBottom: 'var(--space-4)', maxHeight: 220, overflowY: 'auto' }}>
+                                <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: importErrors.length ? 'var(--space-2)' : 0 }}>
+                                    {importFileName && <span className="text-xs" style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{importFileName} — </span>}
+                                    <span style={{ color: 'var(--color-success)' }}>{importItems.length} ready</span>
+                                    {importErrors.length > 0 && <span style={{ color: 'var(--color-warning)', marginLeft: 8 }}>· {importErrors.length} skipped</span>}
+                                </div>
+                                {importErrors.length > 0 && (
+                                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--fs-xs)', color: 'var(--color-warning)' }}>
+                                        {importErrors.slice(0, 20).map((er, i) => <li key={i}>{er}</li>)}
+                                        {importErrors.length > 20 && <li>…and {importErrors.length - 20} more</li>}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+
+                        <button
+                            className="btn btn-primary"
+                            style={{ width: '100%' }}
+                            disabled={importing || importItems.length === 0 || !importSubject.trim()}
+                            onClick={handleRunImport}
+                        >
+                            {importing
+                                ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Importing…</>
+                                : <><Upload size={16} /> Import {importItems.length || ''} question{importItems.length !== 1 ? 's' : ''}</>}
+                        </button>
+                    </div>
                 </div>
             )}
 

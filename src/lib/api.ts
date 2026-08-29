@@ -386,6 +386,29 @@ export async function adminDeleteQuestion(supabase: SupabaseClient, questionId: 
     return { error: error ? new Error(error.message) : null };
 }
 
+// Bulk-insert questions (e.g. from a JSON import). Upserts by id so a re-run
+// with the same ids updates rather than duplicates.
+export async function adminBulkImportQuestions(
+    supabase: SupabaseClient,
+    questions: {
+        id: string;
+        subject: string;
+        topic: string;
+        difficulty: string;
+        stem: string;
+        options: string[];
+        correct_answer: number;
+        explanation: string;
+        source: string;
+        year: number | null;
+    }[]
+): Promise<{ imported: number; error: Error | null }> {
+    if (questions.length === 0) return { imported: 0, error: null };
+    const rows = questions.map(q => ({ ...q, options: JSON.stringify(q.options) }));
+    const { error } = await supabase.from('questions').upsert(rows, { onConflict: 'id' });
+    return { imported: error ? 0 : questions.length, error: error ? new Error(error.message) : null };
+}
+
 // ===== FILE UPLOADS =====
 
 export async function adminUploadCourseContent(supabase: SupabaseClient, file: File, courseId: string, topicId: string): Promise<{ url: string | null; error: Error | null }> {
