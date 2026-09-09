@@ -149,7 +149,7 @@ export default function StarterPackPage() {
 
     return (
         <AppLayout>
-            <div className="page-wrapper" style={{ maxWidth: '800px' }}>
+            <div className="page-wrapper">
                 <div className="page-header">
                     <h1>🚀 IMAT Starter Pack</h1>
                     <p>Everything you need to kickstart your IMAT preparation</p>

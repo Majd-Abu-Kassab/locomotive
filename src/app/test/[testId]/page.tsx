@@ -33,6 +33,7 @@ export default function TestSimulationPage() {
     const [showReport, setShowReport] = useState(false);
     const [timeLeft, setTimeLeft] = useState(100 * 60);
     const [submitted, setSubmitted] = useState(false);
+    const [perQuestionTimer, setPerQuestionTimer] = useState(false);
     const [highlightMode, setHighlightMode] = useState(false);
     const [saving, setSaving] = useState(false);
     const [startTime] = useState(Date.now());
@@ -43,18 +44,22 @@ export default function TestSimulationPage() {
             const stored = sessionStorage.getItem('test_questions');
             const storedMode = sessionStorage.getItem('test_mode') as 'timed' | 'untimed' | null;
             const storedName = sessionStorage.getItem('test_name');
+            const perQ = sessionStorage.getItem('test_timer_mode') === 'per-question';
 
             if (stored) {
                 const parsed = JSON.parse(stored);
                 setQuestions(parsed);
                 if (storedMode) setTestMode(storedMode);
                 if (storedName) setTestName(storedName);
+                setPerQuestionTimer(perQ);
                 if (storedMode === 'untimed') setTimeLeft(0);
+                else if (perQ) setTimeLeft(100); // 100s for the first question
                 else setTimeLeft(parsed.length * 100); // 100 seconds per question (IMAT rule)
                 // Clean up
                 sessionStorage.removeItem('test_questions');
                 sessionStorage.removeItem('test_mode');
                 sessionStorage.removeItem('test_name');
+                sessionStorage.removeItem('test_timer_mode');
             } else {
                 // Fallback: load random questions
                 const signal = getSignal();
@@ -101,52 +106,76 @@ export default function TestSimulationPage() {
         setMarked(prev => ({ ...prev, [qIndex]: !prev[qIndex] }));
     };
 
-    const handleSubmit = async () => {
-        if (!submitted && confirm('Are you sure you want to submit? You cannot change your answers after submission.')) {
-            setSubmitted(true);
-            setSaving(true);
+    // Core submit — no confirmation (used by the button confirm-wrapper and by
+    // the per-question timer's auto-submit on the last question).
+    const doSubmit = async () => {
+        if (submitted) return;
+        setSubmitted(true);
+        setSaving(true);
 
-            if (user) {
-                const result = getScore();
-                const elapsed = Math.round((Date.now() - startTime) / 1000);
-                const m = Math.floor(elapsed / 60);
-                const s = elapsed % 60;
-                const durationStr = `${m}m ${s}s`;
+        if (user) {
+            const result = getScore();
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            const m = Math.floor(elapsed / 60);
+            const s = elapsed % 60;
+            const durationStr = `${m}m ${s}s`;
 
-                const subjects = [...new Set(questions.map(q => q.subject))];
+            const subjects = [...new Set(questions.map(q => q.subject))];
 
-                try {
-                    const { id: testResultId } = await saveTestResult(supabase, {
-                        user_id: user.id,
-                        name: testName,
-                        duration: durationStr,
-                        mode: testMode,
-                        total_questions: questions.length,
-                        correct: result.correct,
-                        incorrect: result.incorrect,
-                        unanswered: result.unanswered,
-                        score: result.score,
-                        max_score: result.maxScore,
-                        subjects,
-                        source: 'mixed',
-                    });
+            try {
+                const { id: testResultId } = await saveTestResult(supabase, {
+                    user_id: user.id,
+                    name: testName,
+                    duration: durationStr,
+                    mode: testMode,
+                    total_questions: questions.length,
+                    correct: result.correct,
+                    incorrect: result.incorrect,
+                    unanswered: result.unanswered,
+                    score: result.score,
+                    max_score: result.maxScore,
+                    subjects,
+                    source: 'mixed',
+                });
 
-                    if (testResultId) {
-                        const testAnswers = questions.map((q, i) => ({
-                            test_result_id: testResultId,
-                            question_id: q.id,
-                            selected_answer: answers[i] ?? null,
-                            is_correct: answers[i] !== undefined && answers[i] !== null ? answers[i] === q.correct_answer : null,
-                        }));
-                        await saveTestAnswers(supabase, testAnswers);
-                    }
-                } catch (err) {
-                    console.error('Error saving test results:', err);
+                if (testResultId) {
+                    const testAnswers = questions.map((q, i) => ({
+                        test_result_id: testResultId,
+                        question_id: q.id,
+                        selected_answer: answers[i] ?? null,
+                        is_correct: answers[i] !== undefined && answers[i] !== null ? answers[i] === q.correct_answer : null,
+                    }));
+                    await saveTestAnswers(supabase, testAnswers);
                 }
+            } catch (err) {
+                console.error('Error saving test results:', err);
             }
-            setSaving(false);
+        }
+        setSaving(false);
+    };
+
+    const handleSubmit = () => {
+        if (!submitted && confirm('Are you sure you want to submit? You cannot change your answers after submission.')) {
+            doSubmit();
         }
     };
+
+    // Per-question timer: give each question a fresh 100s when it becomes active.
+    useEffect(() => {
+        if (perQuestionTimer && !submitted) setTimeLeft(100);
+    }, [currentQ, perQuestionTimer, submitted]);
+
+    // Per-question timer: when a question's time runs out, advance to the next
+    // one (or auto-submit if it was the last).
+    useEffect(() => {
+        if (!perQuestionTimer || submitted || timeLeft > 0) return;
+        if (currentQ < questions.length - 1) {
+            setCurrentQ(q => q + 1);
+        } else {
+            doSubmit();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [perQuestionTimer, submitted, timeLeft, currentQ, questions.length]);
 
     const getScore = () => {
         let correct = 0, incorrect = 0, unanswered = 0;
@@ -319,9 +348,9 @@ export default function TestSimulationPage() {
                     <span className="test-title">{testName}</span>
                 </div>
                 {testMode === 'timed' && (
-                    <div className="test-timer" style={{ color: timeLeft < 300 ? 'var(--color-danger)' : 'var(--text-primary)' }}>
-                        <Clock size={18} />
-                        <span>{formatTime(timeLeft)}</span>
+                    <div className="test-timer" style={{ color: (perQuestionTimer ? timeLeft <= 10 : timeLeft < 300) ? 'var(--color-danger)' : (perQuestionTimer && timeLeft <= 30) ? 'var(--color-warning)' : 'var(--text-primary)' }}>
+                        <Clock size={18} style={{ animation: perQuestionTimer && timeLeft <= 10 ? 'pulse 1s infinite' : 'none' }} />
+                        <span>{perQuestionTimer ? `${timeLeft}s` : formatTime(timeLeft)}</span>
                     </div>
                 )}
                 <div className="test-topbar-right">
@@ -342,6 +371,16 @@ export default function TestSimulationPage() {
                         <Send size={16} /> Submit
                     </button>
                 </div>
+                {perQuestionTimer && (
+                    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: 'var(--border-primary)' }}>
+                        <div style={{
+                            height: '100%',
+                            width: `${Math.max(0, (timeLeft / 100) * 100)}%`,
+                            background: timeLeft <= 10 ? 'var(--color-danger)' : timeLeft <= 30 ? 'var(--color-warning)' : 'var(--brand-accent)',
+                            transition: 'width 1s linear, background var(--transition-fast)',
+                        }} />
+                    </div>
+                )}
             </div>
 
             {/* Main Area */}

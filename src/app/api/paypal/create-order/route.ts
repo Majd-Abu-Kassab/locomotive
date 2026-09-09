@@ -44,11 +44,19 @@ async function getAccessToken(): Promise<string> {
 export async function POST(req: NextRequest) {
     try {
         // --- Rate Limiting (H2) ---
+        // Fail OPEN: if the KV/Upstash backend is unreachable (e.g. the
+        // instance was deleted, DNS fails), the rate-limit check must not be
+        // allowed to block legitimate payments. We log and continue rather
+        // than letting the thrown error fall through to a generic 500.
         if (ratelimit) {
-            const ip = req.headers.get('x-forwarded-for') ?? 'anonymous';
-            const { success } = await ratelimit.limit(`ratelimit_${ip}`);
-            if (!success) {
-                return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+            try {
+                const ip = req.headers.get('x-forwarded-for') ?? 'anonymous';
+                const { success } = await ratelimit.limit(`ratelimit_${ip}`);
+                if (!success) {
+                    return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+                }
+            } catch (rlErr) {
+                console.error('Rate limiter unavailable, allowing request:', rlErr);
             }
         }
 

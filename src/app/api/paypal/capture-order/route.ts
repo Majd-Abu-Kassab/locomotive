@@ -50,11 +50,18 @@ export async function POST(req: NextRequest) {
 
     try {
         // --- Rate Limiting (H2) ---
+        // Fail OPEN: a down/unreachable KV backend must never block a capture.
+        // The buyer has already approved payment at PayPal by this point, so
+        // throwing here would leave money taken with no order recorded.
         if (ratelimit) {
-            const ip = req.headers.get('x-forwarded-for') ?? 'anonymous';
-            const { success } = await ratelimit.limit(`ratelimit_${ip}`);
-            if (!success) {
-                return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+            try {
+                const ip = req.headers.get('x-forwarded-for') ?? 'anonymous';
+                const { success } = await ratelimit.limit(`ratelimit_${ip}`);
+                if (!success) {
+                    return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+                }
+            } catch (rlErr) {
+                console.error('Rate limiter unavailable, allowing request:', rlErr);
             }
         }
 

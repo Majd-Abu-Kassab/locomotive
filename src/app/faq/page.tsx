@@ -16,7 +16,7 @@ export default function FAQPage() {
 
     return (
         <AppLayout>
-            <div className="page-wrapper" style={{ maxWidth: '800px' }}>
+            <div className="page-wrapper">
                 <div className="page-header">
                     <h1>Frequently Asked Questions</h1>
                     <p>Find answers to common questions about LOCOMOTIVE</p>
