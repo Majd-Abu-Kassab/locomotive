@@ -31,14 +31,23 @@ export default function SingleSessionGuard() {
 
     const claim = useCallback(async () => {
         if (!user) return;
-        const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
-            ? crypto.randomUUID()
-            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        localStorage.setItem(SESSION_KEY, id);
-        await supabase
-            .from('profiles')
-            .update({ active_session_id: id, session_last_seen: new Date().toISOString() })
-            .eq('id', user.id);
+        // Hold the busy lock for the WHOLE claim. localStorage is written
+        // synchronously but the DB write is async, so without this lock a
+        // check() firing in between sees local=new but DB=old, mistakes our
+        // own takeover for a competing login, and signs us straight back out.
+        busy.current = true;
+        try {
+            const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            localStorage.setItem(SESSION_KEY, id);
+            await supabase
+                .from('profiles')
+                .update({ active_session_id: id, session_last_seen: new Date().toISOString() })
+                .eq('id', user.id);
+        } finally {
+            busy.current = false;
+        }
     }, [supabase, user]);
 
     const check = useCallback(async () => {
