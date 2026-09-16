@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 
@@ -25,9 +24,12 @@ const RECENT_MS = 90_000;    // another session counts as "live" if seen within 
 export default function SingleSessionGuard() {
     const { user, signOut } = useAuth();
     const supabase = useSupabase();
-    const router = useRouter();
     const [showPrompt, setShowPrompt] = useState(false);
     const busy = useRef(false);
+    // Once we start a sign-out redirect, stop the poller from re-entering — a
+    // soft SPA redirect can race the middleware and leave the page in a
+    // half-signed-out, hanging state, so we hard-navigate and latch this.
+    const redirecting = useRef(false);
 
     const claim = useCallback(async () => {
         if (!user) return;
@@ -51,7 +53,7 @@ export default function SingleSessionGuard() {
     }, [supabase, user]);
 
     const check = useCallback(async () => {
-        if (!user || busy.current || showPrompt) return;
+        if (!user || busy.current || showPrompt || redirecting.current) return;
         busy.current = true;
         try {
             const local = localStorage.getItem(SESSION_KEY);
@@ -73,10 +75,17 @@ export default function SingleSessionGuard() {
                     .eq('id', user.id);
             } else if (local && active && local !== active) {
                 // A newer login took over. Sign out WITHOUT clearing the DB marker
-                // (that belongs to the new session now).
+                // (that belongs to the new session now). Use a HARD navigation:
+                // a soft router.replace here races the middleware's own
+                // unauthenticated redirect and can strand the user on a
+                // half-signed-out page with hanging navigation and a stray
+                // "signed in elsewhere" prompt. A full page load to /login
+                // guarantees a clean landing and preserves the reason message.
+                redirecting.current = true;
                 localStorage.removeItem(SESSION_KEY);
                 await supabase.auth.signOut();
-                router.replace('/login?reason=signed_in_elsewhere');
+                window.location.replace('/login?reason=signed_in_elsewhere');
+                return;
             } else if (!local && active && recent) {
                 // Fresh browser, another live session exists — ask before taking over.
                 setShowPrompt(true);
@@ -90,7 +99,7 @@ export default function SingleSessionGuard() {
         } finally {
             busy.current = false;
         }
-    }, [user, supabase, router, claim, showPrompt]);
+    }, [user, supabase, claim, showPrompt]);
 
     useEffect(() => {
         if (!user) return;
@@ -111,9 +120,12 @@ export default function SingleSessionGuard() {
 
     const cancel = async () => {
         setShowPrompt(false);
+        redirecting.current = true;
         localStorage.removeItem(SESSION_KEY);
         await signOut();
-        router.replace('/login');
+        // Hard navigation for the same reason as the superseded branch: a soft
+        // redirect after signOut races the middleware and can hang.
+        window.location.replace('/login');
     };
 
     if (!showPrompt) return null;

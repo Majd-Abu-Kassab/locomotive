@@ -15,7 +15,9 @@ export default function CreateTestPage() {
     const { profile } = useAuth();
     const supabase = useSupabase();
     const { getSignal } = useAbortController();
-    const isPaidPlan = profile?.plan && profile.plan !== 'free-trial';
+    // Admins get a preview privilege: they can access all questions (incl.
+    // premium-sourced ones) regardless of plan, so they can QA content.
+    const isPaidPlan = !!profile?.admin_role || (!!profile?.plan && profile.plan !== 'free-trial');
     const [mode, setMode] = useState<'timed' | 'untimed'>('timed');
     const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
     const [questionCount, setQuestionCount] = useState(60);
@@ -24,6 +26,10 @@ export default function CreateTestPage() {
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [loading, setLoading] = useState(true);
     const [starting, setStarting] = useState(false);
+    // Why a test couldn't start, so we explain instead of dead-ending on an
+    // empty test page. `upgrade` distinguishes "all matches are premium" from
+    // "nothing matched these filters".
+    const [notice, setNotice] = useState<{ text: string; upgrade: boolean } | null>(null);
 
     useEffect(() => {
         const signal = getSignal();
@@ -49,6 +55,7 @@ export default function CreateTestPage() {
 
     const startTest = async () => {
         setStarting(true);
+        setNotice(null);
         // Fetch questions matching filters
         const subjectNames = selectedSubjects.length > 0 ? selectedSubjects : undefined;
         try {
@@ -64,8 +71,19 @@ export default function CreateTestPage() {
             if (!isPaidPlan) {
                 finalQuestions = finalQuestions.filter(q => q.source !== 'locomotive-original');
             }
-            
+
             finalQuestions = finalQuestions.slice(0, questionCount);
+
+            // Nothing to start — explain why instead of pushing the user to an
+            // empty test page. If raw matches existed but the premium filter
+            // removed them all, point to unlocking rather than "no questions".
+            if (finalQuestions.length === 0) {
+                setNotice(questions.length > 0
+                    ? { text: 'These questions are premium — unlock this course to practice them.', upgrade: true }
+                    : { text: 'No questions match these filters yet. Try different subjects or difficulty.', upgrade: false });
+                setStarting(false);
+                return;
+            }
 
             // Store questions in sessionStorage for the test page
             sessionStorage.setItem('test_questions', JSON.stringify(finalQuestions));
@@ -200,6 +218,25 @@ export default function CreateTestPage() {
                         </div>
                     </div>
                 </div>
+
+                {notice && (
+                    <div
+                        role="status"
+                        style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)',
+                            padding: 'var(--space-3) var(--space-4)', marginBottom: 'var(--space-3)',
+                            border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)',
+                            background: 'var(--bg-glass)', fontSize: 'var(--fs-sm)',
+                        }}
+                    >
+                        <span>{notice.text}</span>
+                        {notice.upgrade && (
+                            <button className="btn btn-primary btn-sm" onClick={() => router.push('/upgrade')}>
+                                <Lock size={14} /> Unlock course
+                            </button>
+                        )}
+                    </div>
+                )}
 
                 {/* Summary */}
                 <div className="ct-summary">

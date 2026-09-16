@@ -249,6 +249,15 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
                     )}
                 </div>
 
+                <button
+                    className="topbar-btn"
+                    onClick={toggleTheme}
+                    aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                    title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                >
+                    {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+                </button>
+
                 <div className="user-menu-wrapper">
                     <button
                         className="user-menu-btn"
@@ -274,10 +283,6 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
                                 <Settings size={16} />
                                 <span>Profile Settings</span>
                             </Link>
-                            <button className="dropdown-item" onClick={toggleTheme} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 'inherit', color: 'inherit', textAlign: 'left' }}>
-                                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-                                <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
-                            </button>
                             <button className="dropdown-item" onClick={handleSignOut} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 'inherit', color: 'inherit', textAlign: 'left' }}>
                                 <LogOut size={16} />
                                 <span>Sign Out</span>

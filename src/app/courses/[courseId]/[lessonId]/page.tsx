@@ -107,9 +107,10 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
         if (!course || !topic) return;
         setQuizLoading(true);
         try {
+            // Pull every question in this course's bank (subject === course name).
+            // No limit — the quiz uses all available questions for the topic.
             const questions = await getQuestions(supabase, {
                 subjects: [course.name],
-                limit: 5,
             });
             if (questions.length === 0) {
                 setQuizLoading(false);
@@ -117,7 +118,9 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
             }
             sessionStorage.setItem('test_questions', JSON.stringify(questions));
             sessionStorage.setItem('test_mode', 'timed');
-            sessionStorage.setItem('test_timer_mode', 'per-question'); // 100s per question
+            // Total countdown for the whole quiz (100s × number of questions),
+            // not a per-question timer. Clear any stale per-question flag.
+            sessionStorage.removeItem('test_timer_mode');
             sessionStorage.setItem('test_name', `${topic.name} — Practice Quiz`);
             router.push('/test/quiz');
         } catch (err) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
     Clock, Flag, FlagOff, AlertTriangle, StickyNote, ChevronLeft, ChevronRight, Send, X, Loader2
@@ -38,8 +38,16 @@ export default function TestSimulationPage() {
     const [saving, setSaving] = useState(false);
     const [startTime] = useState(Date.now());
 
-    // Load questions from sessionStorage or fallback to DB
+    // Load questions from sessionStorage or fallback to DB.
+    // The loader CONSUMES the sessionStorage handoff (it deletes the keys after
+    // reading), so it must run exactly once. React Strict Mode (dev) and any
+    // dependency change would otherwise re-run it: the second pass finds the
+    // keys already cleared and silently drops into the random fallback,
+    // replacing the intended quiz questions. This ref guards against that.
+    const didLoadRef = useRef(false);
     useEffect(() => {
+        if (didLoadRef.current) return;
+        didLoadRef.current = true;
         async function load() {
             const stored = sessionStorage.getItem('test_questions');
             const storedMode = sessionStorage.getItem('test_mode') as 'timed' | 'untimed' | null;

@@ -131,11 +131,11 @@ export default function AdminPage() {
     const stemRef = useRef<HTMLTextAreaElement>(null);
     const explanationRef = useRef<HTMLTextAreaElement>(null);
 
-    // JSON import
+    // JSON import — questions are tied to a course by picking it here. The
+    // chosen course name becomes both the subject (how questions link to a
+    // course) and the source. Difficulty defaults to 'medium'.
     const [importOpen, setImportOpen] = useState(false);
-    const [importSubject, setImportSubject] = useState('');
-    const [importSource, setImportSource] = useState('locomotive-original');
-    const [importDifficulty, setImportDifficulty] = useState('medium');
+    const [importCourseName, setImportCourseName] = useState('');
     const [importItems, setImportItems] = useState<ParsedItem[]>([]);
     const [importErrors, setImportErrors] = useState<string[]>([]);
     const [importFileName, setImportFileName] = useState('');
@@ -486,19 +486,26 @@ export default function AdminPage() {
     };
 
     const handleRunImport = async () => {
-        if (!importSubject.trim()) { addToast('Enter a subject for these questions.', 'warning'); return; }
+        const courseName = importCourseName.trim();
+        if (!courseName) { addToast('Select a course for these questions.', 'warning'); return; }
         if (importItems.length === 0) { addToast('No valid questions to import.', 'warning'); return; }
         setImporting(true);
         const rows = importItems.map((it, i) => ({
-            id: `imp-${slugify(importSubject)}-${slugify(it.topic)}-${i + 1}-${Math.random().toString(36).slice(2, 6)}`,
-            subject: importSubject.trim(),
+            id: `imp-${slugify(courseName)}-${slugify(it.topic)}-${i + 1}-${Math.random().toString(36).slice(2, 6)}`,
+            // subject links the question to its course (question.subject === course.name).
+            // source is a fixed provenance vocabulary — DB CHECK allows only
+            // 'official-imat' | 'locomotive-original' | 'italian-medical' — so it
+            // CANNOT be the course name. Default to the non-premium 'official-imat'
+            // so imported questions aren't hidden behind the premium filter.
+            // difficulty defaults to 'medium'.
+            subject: courseName,
             topic: it.topic,
-            difficulty: importDifficulty,
+            difficulty: 'medium',
             stem: it.stem,
             options: it.options,
             correct_answer: it.correct,
             explanation: it.explanation,
-            source: importSource,
+            source: 'official-imat',
             year: null,
         }));
         const { imported, error } = await adminBulkImportQuestions(supabase, rows);
@@ -1966,31 +1973,18 @@ export default function AdminPage() {
                             <button className="btn btn-ghost btn-sm" onClick={() => setImportOpen(false)} disabled={importing}><X size={16} /></button>
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
-                            <div className="input-group">
-                                <label>Subject *</label>
-                                <input className="input" placeholder="e.g. Mathematics" value={importSubject} onChange={e => setImportSubject(e.target.value)} />
-                            </div>
-                            <div className="input-group">
-                                <label>Source</label>
-                                <select className="select" value={importSource} onChange={e => setImportSource(e.target.value)}>
-                                    <option value="official-imat">Official IMAT</option>
-                                    <option value="locomotive-original">LOCOMOTIVE Original</option>
-                                    <option value="italian-medical">Italian Medical</option>
-                                </select>
-                            </div>
-                            <div className="input-group">
-                                <label>Difficulty</label>
-                                <select className="select" value={importDifficulty} onChange={e => setImportDifficulty(e.target.value)}>
-                                    <option value="easy">Easy</option>
-                                    <option value="medium">Medium</option>
-                                    <option value="hard">Hard</option>
-                                </select>
-                            </div>
+                        <div className="input-group" style={{ marginBottom: 'var(--space-3)' }}>
+                            <label>Course *</label>
+                            <select className="select" value={importCourseName} onChange={e => setImportCourseName(e.target.value)}>
+                                <option value="">Select a course…</option>
+                                {courses.map(c => (
+                                    <option key={c.id} value={c.name}>{c.name}</option>
+                                ))}
+                            </select>
                         </div>
 
                         <p className="text-xs text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
-                            Subject, source, and difficulty apply to every question in the file. Each quiz&apos;s <code>quiz_title</code> becomes the topic. HTML in explanations is converted to plain text.
+                            Every question in the file is added to the selected course. Each quiz&apos;s <code>quiz_title</code> becomes the topic. HTML in explanations is converted to plain text.
                         </p>
 
                         <input
@@ -2019,7 +2013,7 @@ export default function AdminPage() {
                         <button
                             className="btn btn-primary"
                             style={{ width: '100%' }}
-                            disabled={importing || importItems.length === 0 || !importSubject.trim()}
+                            disabled={importing || importItems.length === 0 || !importCourseName.trim()}
                             onClick={handleRunImport}
                         >
                             {importing
