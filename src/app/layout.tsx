@@ -5,6 +5,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ToastProvider } from "@/components/Toast";
 import SingleSessionGuard from "@/components/SingleSessionGuard";
+import ActivityHeartbeat from "@/components/ActivityHeartbeat";
 import { Analytics } from "@vercel/analytics/react";
 import "katex/dist/katex.min.css";
 import "./globals.css";
@@ -33,6 +34,7 @@ export default async function RootLayout({
             <AuthProvider>
               <ToastProvider>
                 <SingleSessionGuard />
+                <ActivityHeartbeat />
                 {children}
               </ToastProvider>
             </AuthProvider>

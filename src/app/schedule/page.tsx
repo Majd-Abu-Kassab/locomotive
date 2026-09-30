@@ -116,7 +116,7 @@ export default function SchedulePage() {
 
     return (
         <AppLayout>
-            <div className="page-wrapper" style={{ maxWidth: '1000px' }}>
+            <div className="page-wrapper" style={{ maxWidth: '1300px' }}>
                 <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
                         <h1>Study Schedule</h1>
@@ -143,7 +143,7 @@ export default function SchedulePage() {
                             </div>
                         ))}
                         {Array(firstDay).fill(null).map((_, i) => (
-                            <div key={`empty-${i}`} style={{ background: 'var(--bg-secondary)', minHeight: 80 }} />
+                            <div key={`empty-${i}`} style={{ background: 'var(--bg-secondary)', minHeight: 120 }} />
                         ))}
                         {Array(daysInMonth).fill(null).map((_, i) => {
                             const day = i + 1;
@@ -154,7 +154,7 @@ export default function SchedulePage() {
                                     key={day}
                                     style={{
                                         background: 'var(--bg-secondary)',
-                                        minHeight: 80,
+                                        minHeight: 120,
                                         padding: 'var(--space-1)',
                                         cursor: 'pointer',
                                         position: 'relative',
@@ -165,10 +165,10 @@ export default function SchedulePage() {
                                     onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-secondary)')}
                                 >
                                     <div style={{
-                                        fontSize: 'var(--fs-xs)',
+                                        fontSize: 'var(--fs-sm)',
                                         fontWeight: isToday ? 700 : 400,
                                         color: isToday ? 'var(--brand-accent-light)' : 'var(--text-secondary)',
-                                        width: 22, height: 22,
+                                        width: 28, height: 28,
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                                         borderRadius: '50%',
                                         background: isToday ? 'rgba(37, 99, 235, 0.2)' : 'transparent',
@@ -177,9 +177,9 @@ export default function SchedulePage() {
                                     </div>
                                     {dayEvents.map(ev => (
                                         <div key={ev.id} style={{
-                                            fontSize: '10px',
-                                            padding: '1px 4px',
-                                            borderRadius: 3,
+                                            fontSize: 'var(--fs-xs)',
+                                            padding: '2px 6px',
+                                            borderRadius: 4,
                                             background: `${typeColors[ev.type]}22`,
                                             color: typeColors[ev.type],
                                             marginTop: 2,

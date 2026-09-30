@@ -94,7 +94,7 @@ export default function OrderHistoryPage() {
 
     return (
         <AppLayout>
-            <div className="page-wrapper" style={{ maxWidth: '900px' }}>
+            <div className="page-wrapper" style={{ maxWidth: '1200px' }}>
                 <Link href="/dashboard" className="btn btn-ghost btn-sm" style={{ marginBottom: 'var(--space-4)' }}>
                     <ArrowLeft size={16} /> Back to Dashboard
                 </Link>

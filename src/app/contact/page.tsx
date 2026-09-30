@@ -62,7 +62,7 @@ export default function ContactPage() {
 
     return (
         <AppLayout>
-            <div className="page-wrapper" style={{ maxWidth: '700px' }}>
+            <div className="page-wrapper" style={{ maxWidth: '1000px' }}>
                 <div className="page-header">
                     <h1>Contact Support</h1>
                     <p>We&apos;re here to help you succeed</p>
