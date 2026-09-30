@@ -105,21 +105,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         initAuth();
 
-        // Listen for auth changes
+        // Listen for auth changes.
+        // The callback MUST stay synchronous: Supabase invokes it while holding
+        // its auth lock (e.g. the SIGNED_IN it fires every time the tab becomes
+        // visible again). Any Supabase call awaited in here needs that same
+        // lock to read the access token, so awaiting it deadlocks the client —
+        // every later query hangs and the whole app sits on a loading spinner.
+        // Defer the profile fetch until after the lock is released.
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, session) => {
+            (event, session) => {
                 if (cancelled) return;
                 const currentUser = session?.user ?? null;
                 setUser(currentUser);
 
                 if (currentUser) {
-                    const p = await fetchProfile(currentUser.id);
-                    if (!cancelled) setProfile(p);
+                    setTimeout(async () => {
+                        const p = await fetchProfile(currentUser.id);
+                        if (!cancelled) {
+                            setProfile(p);
+                            setLoading(false);
+                        }
+                    }, 0);
                 } else {
                     setProfile(null);
+                    setLoading(false);
                 }
-
-                if (!cancelled) setLoading(false);
             }
         );
 
