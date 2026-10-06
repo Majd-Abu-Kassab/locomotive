@@ -4,6 +4,8 @@ import { SupabaseProvider } from "@/contexts/SupabaseContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ToastProvider } from "@/components/Toast";
+import { MemotiveProvider } from "@/contexts/MemotiveContext";
+import MemotiveRoot from "@/components/memotive/MemotiveRoot";
 import SingleSessionGuard from "@/components/SingleSessionGuard";
 import ActivityHeartbeat from "@/components/ActivityHeartbeat";
 import { Analytics } from "@vercel/analytics/react";
@@ -33,9 +35,12 @@ export default async function RootLayout({
           <SupabaseProvider>
             <AuthProvider>
               <ToastProvider>
-                <SingleSessionGuard />
-                <ActivityHeartbeat />
-                {children}
+                <MemotiveProvider>
+                  <SingleSessionGuard />
+                  <ActivityHeartbeat />
+                  {children}
+                  <MemotiveRoot />
+                </MemotiveProvider>
               </ToastProvider>
             </AuthProvider>
           </SupabaseProvider>

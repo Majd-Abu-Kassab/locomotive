@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import type { User, AuthError } from '@supabase/supabase-js';
 
@@ -47,8 +47,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [profile, setProfile] = useState<Profile | null>(null);
     const [loading, setLoading] = useState(true);
+    // Mirrors of state for the auth listener, which is registered once and
+    // can't read fresh state from its closure.
+    const userIdRef = useRef<string | null>(null);
+    const hasProfileRef = useRef(false);
 
     const supabase = useSupabase();
+
+    useEffect(() => { hasProfileRef.current = !!profile; }, [profile]);
 
     const fetchProfile = useCallback(async (userId: string) => {
         const { data, error } = await supabase
@@ -90,6 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 const { data: { session } } = await supabase.auth.getSession();
                 if (cancelled) return;
                 const currentUser = session?.user ?? null;
+                userIdRef.current = currentUser?.id ?? null;
                 setUser(currentUser);
 
                 if (currentUser) {
@@ -116,6 +123,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             (event, session) => {
                 if (cancelled) return;
                 const currentUser = session?.user ?? null;
+
+                // Supabase re-announces the session for the SAME user every
+                // time the tab becomes visible again (SIGNED_IN) and when it
+                // refreshes the token (TOKEN_REFRESHED). Swapping in a new
+                // user object re-ran every effect that depends on it, so the
+                // whole app refetched its data on each tab switch. If it's the
+                // same user and their profile is loaded, there's nothing new.
+                // USER_UPDATED and anything else still go through in full.
+                const isRepeat = event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION';
+                if (isRepeat && currentUser && currentUser.id === userIdRef.current && hasProfileRef.current) {
+                    setLoading(false);
+                    return;
+                }
+
+                userIdRef.current = currentUser?.id ?? null;
                 setUser(currentUser);
 
                 if (currentUser) {
@@ -199,6 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // best-effort — don't block sign-out on marker cleanup
         }
         await supabase.auth.signOut();
+        userIdRef.current = null;
         setUser(null);
         setProfile(null);
     };

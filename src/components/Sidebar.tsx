@@ -20,9 +20,11 @@ import {
     Settings,
     Receipt,
     X,
+    Brain,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
+import { useMemotive } from '@/contexts/MemotiveContext';
 import { getCourses, CourseWithModules } from '@/lib/api';
 import './Sidebar.css';
 
@@ -39,6 +41,7 @@ const baseNavItems = [
         category: 'STUDY',
         items: [
             { name: 'Schedule', href: '/schedule', icon: Calendar },
+            { name: 'Memotive', href: '/memotive', icon: Brain },
         ],
     },
     {
@@ -77,6 +80,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
     const { profile } = useAuth();
     const supabase = useSupabase();
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
+    const memotiveDue = useMemotive().totalDue.total;
 
     useEffect(() => {
         getCourses(supabase).then(setCourses).catch(console.error);
@@ -143,6 +147,11 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                                         >
                                             {Icon ? <Icon size={18} /> : <span style={{ fontSize: '18px', width: '18px', display: 'inline-block', textAlign: 'center' }}>{item.emoji}</span>}
                                             {!collapsed && <span>{item.name}</span>}
+                                            {item.href === '/memotive' && memotiveDue > 0 && (
+                                                <span className="nav-badge" aria-label={`${memotiveDue} cards due`}>
+                                                    {memotiveDue > 99 ? '99+' : memotiveDue}
+                                                </span>
+                                            )}
                                             {isActive && <div className="active-indicator" />}
                                         </Link>
                                     </li>

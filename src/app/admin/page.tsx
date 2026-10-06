@@ -560,6 +560,7 @@ export default function AdminPage() {
             price: editingSection.price || 0,
             currency: editingSection.currency || 'EUR',
             sort_order: editingSection.sort_order || sections.length,
+            includes_memotive: !!editingSection.includes_memotive,
         });
 
         if (error) { addToast(error.message, 'error'); }
@@ -1027,7 +1028,7 @@ export default function AdminPage() {
                                 ) : (
                                     <div className="table-wrapper">
                                         <table>
-                                            <thead><tr><th>#</th><th>Section Name</th><th>Price</th><th>Currency</th><th>Modules</th><th>Actions</th></tr></thead>
+                                            <thead><tr><th>#</th><th>Section Name</th><th>Price</th><th>Currency</th><th>Modules</th><th>Memotive</th><th>Actions</th></tr></thead>
                                             <tbody>
                                                 {sections.map(s => (
                                                     <tr key={s.id}>
@@ -1036,6 +1037,7 @@ export default function AdminPage() {
                                                         <td>€{Number(s.price).toFixed(2)}</td>
                                                         <td className="text-secondary text-xs">{s.currency}</td>
                                                         <td className="text-secondary text-xs">{(s.moduleIds || []).length} modules</td>
+                                                        <td>{s.includes_memotive ? <span className="badge badge-success">Included</span> : <span className="text-secondary text-xs">—</span>}</td>
                                                         <td>
                                                             <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
                                                                 <button className="btn btn-ghost btn-sm" onClick={() => setEditingSection(s)}><Edit3 size={14} /></button>
@@ -1309,6 +1311,13 @@ export default function AdminPage() {
                                     </select>
                                 </div>
                             </div>
+                            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)', cursor: 'pointer', padding: 'var(--space-3)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', background: editingSection.includes_memotive ? 'rgba(37,99,235,0.1)' : 'transparent' }}>
+                                <input type="checkbox" style={{ marginTop: 3 }} checked={!!editingSection.includes_memotive} onChange={e => setEditingSection({ ...editingSection, includes_memotive: e.target.checked })} />
+                                <span>
+                                    <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, display: 'block' }}>Includes Memotive</span>
+                                    <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>Students who buy this section get unlimited flashcards.</span>
+                                </span>
+                            </label>
                             {/* Module assignment */}
                             <div>
                                 <label style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', display: 'block', marginBottom: 'var(--space-2)' }}>Assign Modules</label>

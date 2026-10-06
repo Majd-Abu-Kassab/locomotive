@@ -10,6 +10,7 @@ import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { saveTestResult, saveTestAnswers, QuestionRow, getQuestions } from '@/lib/api';
 import { RichTextPreview } from '@/components/RichTextEditor';
+import AddQuestionToMemotive from '@/components/memotive/AddQuestionToMemotive';
 import './test-sim.css';
 
 type AnswerState = { [qIndex: number]: number | null };
@@ -325,6 +326,7 @@ export default function TestSimulationPage() {
                                             <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)', fontStyle: 'italic' }}>
                                                 <RichTextPreview text={question.explanation || ''} />
                                             </p>
+                                            <AddQuestionToMemotive question={question} />
                                         </div>
                                     </div>
                                 </div>

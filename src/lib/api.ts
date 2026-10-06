@@ -456,6 +456,7 @@ export interface CourseSection {
     price: number;
     currency: string;
     sort_order: number;
+    includes_memotive?: boolean;
     // Joined
     unlocked?: boolean;
     moduleIds?: string[];
@@ -539,6 +540,7 @@ export async function getCourseSections(supabase: SupabaseClient, courseId: stri
         price: s.price,
         currency: s.currency,
         sort_order: s.sort_order,
+        includes_memotive: !!s.includes_memotive,
         unlocked: userId ? unlockedSectionIds.has(s.id) : false,
         moduleIds: (s.section_module_map || []).map((m: { module_id: string }) => m.module_id),
     }));
@@ -552,6 +554,7 @@ export async function adminSaveSection(supabase: SupabaseClient, section: {
     price: number;
     currency: string;
     sort_order: number;
+    includes_memotive: boolean;
 }): Promise<{ id: string | null; error: Error | null }> {
     const payload = section.id ? section : { ...section };
     if (!section.id) delete (payload as Partial<typeof section>).id;

@@ -6,6 +6,7 @@ import { Search, Bell, User, ChevronDown, LogOut, Settings, BookOpen, HelpCircle
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
+import { NOTIFICATIONS_CHANGED_EVENT } from '@/contexts/MemotiveContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourses, CourseWithModules, getNotifications, markNotificationAsRead, markAllNotificationsAsRead, NotificationRow } from '@/lib/api';
 import './Topbar.css';
@@ -61,6 +62,19 @@ export default function Topbar({ onMenuToggle }: TopbarProps) {
                 });
         }
     }, [supabase, user, getSignal]);
+
+    // Reload the bell when something posts a notification client-side
+    // (Memotive's daily reminder).
+    useEffect(() => {
+        if (!user) return;
+        const reload = () => {
+            getNotifications(supabase, user.id)
+                .then(setNotifications)
+                .catch(err => console.error('Notifications reload error:', err));
+        };
+        window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, reload);
+        return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, reload);
+    }, [supabase, user]);
 
     // Close search on click outside
     useEffect(() => {

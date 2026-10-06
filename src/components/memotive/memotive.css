@@ -1,0 +1,623 @@
+/* ═══════════════════════════════════════════════════════════
+   MEMOTIVE — flashcards. Bubble + half-page panel + full page.
+   Layering: below the Topbar (90) so its dropdowns still open
+   over the panel; below the mobile sidebar (100) and modals.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ----- Bubble ----- */
+.mm-bubble {
+    position: fixed;
+    right: var(--space-6);
+    bottom: var(--space-6);
+    width: 56px;
+    height: 56px;
+    border-radius: var(--radius-full);
+    border: none;
+    background: linear-gradient(135deg, var(--brand-accent), var(--brand-accent-light));
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg), var(--shadow-glow-lg);
+    z-index: 85;
+    transition: transform var(--transition-spring);
+}
+
+.mm-bubble:hover {
+    transform: scale(1.08);
+}
+
+.mm-bubble:focus-visible {
+    outline: 3px solid var(--border-focus);
+    outline-offset: 3px;
+}
+
+.mm-bubble-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: var(--radius-full);
+    background: var(--color-danger);
+    color: white;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--bg-primary);
+}
+
+/* ----- Panel (right half on desktop, bottom sheet on phones) ----- */
+.mm-panel {
+    position: fixed;
+    top: var(--topbar-height);
+    right: 0;
+    bottom: 0;
+    width: 50vw;
+    min-width: 380px;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-primary);
+    box-shadow: var(--shadow-xl);
+    z-index: 85;
+    display: flex;
+    flex-direction: column;
+    animation: mmSlideIn 0.25s ease-out;
+}
+
+@keyframes mmSlideIn {
+    from { transform: translateX(40px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+}
+
+@media (max-width: 768px) {
+    .mm-bubble {
+        right: var(--space-4);
+        bottom: var(--space-4);
+    }
+
+    .mm-panel {
+        top: auto;
+        left: 0;
+        width: 100%;
+        min-width: 0;
+        height: 55dvh;
+        border-left: none;
+        border-top: 1px solid var(--border-primary);
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        transition: height var(--transition-base);
+        animation: mmSlideUp 0.25s ease-out;
+    }
+
+    .mm-panel.expanded {
+        height: calc(100dvh - var(--topbar-height));
+        border-radius: 0;
+    }
+
+    @keyframes mmSlideUp {
+        from { transform: translateY(40px); opacity: 0; }
+        to { transform: none; opacity: 1; }
+    }
+}
+
+.mm-sheet-handle {
+    display: none;
+}
+
+/* Phones: the sheet's handle already expands it, so drop "open full page"
+   and tighten the header so the title isn't squeezed. */
+@media (max-width: 480px) {
+    .mm-panel .mm-header {
+        gap: 2px;
+        padding: var(--space-2) var(--space-3);
+    }
+
+    .mm-panel .mm-open-page {
+        display: none;
+    }
+
+    .mm-app .mm-counts > span {
+        width: 38px;
+    }
+
+    .mm-panel .mm-body {
+        padding: var(--space-3);
+    }
+}
+
+@media (max-width: 768px) {
+    .mm-sheet-handle {
+        display: block;
+        width: 100%;
+        padding: var(--space-2) 0 0;
+        background: none;
+        border: none;
+        cursor: pointer;
+    }
+
+    .mm-sheet-handle::before {
+        content: '';
+        display: block;
+        width: 40px;
+        height: 4px;
+        margin: 0 auto;
+        border-radius: var(--radius-full);
+        background: var(--text-tertiary);
+        opacity: 0.5;
+    }
+}
+
+/* ----- App shell (shared by panel and full page) ----- */
+.mm-app {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+}
+
+.mm-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-primary);
+}
+
+.mm-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: 700;
+    font-size: var(--fs-lg);
+    margin-right: auto;
+    min-width: 0;
+}
+
+.mm-title-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, var(--brand-accent), var(--brand-accent-light));
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.mm-icon-btn {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex-shrink: 0;
+    text-decoration: none;
+    transition: all var(--transition-fast);
+}
+
+.mm-icon-btn:hover {
+    background: var(--bg-glass-hover);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+
+.mm-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-4);
+    min-height: 0;
+}
+
+.mm-app.page .mm-body {
+    overflow: visible;
+    padding: var(--space-6) 0;
+}
+
+.mm-app.page .mm-header {
+    padding: 0 0 var(--space-4);
+}
+
+.mm-back {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    padding: 0;
+    margin-bottom: var(--space-4);
+}
+
+.mm-back:hover {
+    color: var(--text-primary);
+}
+
+/* ----- Plan status ----- */
+.mm-plan {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--bg-glass);
+    border: 1px solid var(--border-primary);
+    margin-bottom: var(--space-4);
+    font-size: var(--fs-sm);
+    flex-wrap: wrap;
+}
+
+.mm-plan-bar {
+    flex: 1;
+    min-width: 80px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background: var(--border-primary);
+    overflow: hidden;
+}
+
+.mm-plan-bar > div {
+    height: 100%;
+    background: var(--brand-accent);
+    border-radius: inherit;
+}
+
+.mm-plan-bar.full > div {
+    background: var(--color-warning);
+}
+
+.mm-banner {
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    background: rgba(245, 158, 11, 0.08);
+    font-size: var(--fs-sm);
+    margin-bottom: var(--space-4);
+    line-height: 1.5;
+}
+
+/* ----- Deck list ----- */
+.mm-decks {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.mm-deck-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-secondary);
+}
+
+.mm-deck-row:last-child {
+    border-bottom: none;
+}
+
+.mm-deck-row.head {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: var(--bg-glass);
+}
+
+.mm-deck-name {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    padding: 0;
+    font-size: var(--fs-base);
+}
+
+.mm-deck-name:hover {
+    color: var(--text-accent);
+}
+
+.mm-counts {
+    display: flex;
+    gap: var(--space-1);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: var(--fs-sm);
+}
+
+.mm-counts > span {
+    width: 44px;
+    text-align: right;
+}
+
+.mm-deck-row.head .mm-counts {
+    font-weight: 600;
+    font-size: var(--fs-xs);
+    letter-spacing: 0.02em;
+}
+
+.mm-count-new { color: var(--brand-accent-light); }
+.mm-count-learn { color: var(--color-danger-light); }
+.mm-count-review { color: var(--color-success); }
+.mm-count-zero { color: var(--text-tertiary); opacity: 0.5; }
+
+.mm-empty {
+    text-align: center;
+    padding: var(--space-10) var(--space-4);
+    color: var(--text-secondary);
+}
+
+.mm-empty-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: var(--radius-full);
+    background: rgba(37, 99, 235, 0.12);
+    color: var(--brand-accent-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto var(--space-4);
+}
+
+.mm-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: var(--space-4);
+}
+
+/* ----- Study ----- */
+.mm-study {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+}
+
+.mm-study-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+}
+
+.mm-card {
+    flex: 1;
+    padding: var(--space-6) var(--space-4);
+    font-size: var(--fs-lg);
+    line-height: 1.6;
+    text-align: center;
+}
+
+.mm-content {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.mm-content img {
+    margin-left: auto !important;
+    margin-right: auto !important;
+    max-height: 360px;
+}
+
+.mm-divider {
+    height: 1px;
+    background: var(--border-primary);
+    margin: var(--space-5) 0;
+    border: none;
+}
+
+.mm-cloze {
+    font-weight: 700;
+    color: var(--text-accent);
+}
+
+.mm-cloze.hidden {
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-sm);
+    background: rgba(37, 99, 235, 0.15);
+}
+
+.mm-typed {
+    max-width: 420px;
+    margin: var(--space-5) auto 0;
+}
+
+.mm-typed-result {
+    font-size: var(--fs-base);
+    margin-top: var(--space-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.mm-typed-result .ok { color: var(--color-success); }
+.mm-typed-result .bad { color: var(--color-danger); text-decoration: line-through; }
+
+.mm-answer-bar {
+    position: sticky;
+    bottom: 0;
+    padding: var(--space-3) 0 var(--space-1);
+    background: linear-gradient(transparent, var(--bg-secondary) 30%);
+}
+
+.mm-app.page .mm-answer-bar {
+    background: linear-gradient(transparent, var(--bg-primary) 30%);
+}
+
+.mm-ratings {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-2);
+}
+
+.mm-rating {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: var(--space-2);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-primary);
+    background: var(--bg-glass);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: var(--fs-sm);
+    transition: all var(--transition-fast);
+}
+
+.mm-rating small {
+    font-weight: 500;
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+.mm-rating:hover { background: var(--bg-glass-hover); }
+.mm-rating.r1:hover { border-color: var(--color-danger); }
+.mm-rating.r2:hover { border-color: var(--color-warning); }
+.mm-rating.r3:hover { border-color: var(--color-success); }
+.mm-rating.r4:hover { border-color: var(--brand-accent-light); }
+.mm-rating.r1 { color: var(--color-danger-light); }
+.mm-rating.r2 { color: var(--color-warning); }
+.mm-rating.r3 { color: var(--color-success); }
+.mm-rating.r4 { color: var(--brand-accent-light); }
+
+.mm-kbd {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    text-align: center;
+    margin-top: var(--space-2);
+}
+
+/* ----- Editor ----- */
+.mm-field {
+    margin-bottom: var(--space-4);
+}
+
+.mm-field > label {
+    display: block;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-2);
+}
+
+.mm-field textarea {
+    width: 100%;
+    min-height: 110px;
+    resize: vertical;
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    font-family: inherit;
+}
+
+.mm-types {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--space-2);
+}
+
+.mm-type {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-primary);
+    background: var(--bg-glass);
+    color: var(--text-secondary);
+    cursor: pointer;
+    text-align: left;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+}
+
+.mm-type.active {
+    border-color: var(--brand-accent);
+    background: rgba(37, 99, 235, 0.12);
+    color: var(--text-primary);
+}
+
+.mm-hint {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    margin-top: var(--space-2);
+    line-height: 1.5;
+}
+
+.mm-preview {
+    border: 1px dashed var(--border-primary);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    font-size: var(--fs-base);
+    line-height: 1.6;
+}
+
+.mm-error {
+    color: var(--color-danger-light);
+    font-size: var(--fs-sm);
+    margin-bottom: var(--space-3);
+}
+
+/* ----- Browse ----- */
+.mm-note-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border-bottom: 1px solid var(--border-secondary);
+}
+
+.mm-note-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.mm-note-text > div:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-sm);
+}
+
+.mm-note-meta {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+
+.mm-toolbar {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.mm-toolbar .input {
+    flex: 1;
+    min-width: 160px;
+}
+
+.mm-toolbar .select {
+    width: auto;
+}
+
+/* ----- Add-to-Memotive button (test review) ----- */
+.mm-add-from-q {
+    margin-top: var(--space-2);
+}

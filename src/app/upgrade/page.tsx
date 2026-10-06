@@ -313,6 +313,9 @@ function UpgradeContent() {
                                                     </div>
                                                     <div className="text-xs text-secondary">
                                                         {section.unlocked ? '✅ Access granted until exam date' : `${(section.moduleIds || []).length} modules included`}
+                                                        {section.includes_memotive && (
+                                                            <span className="badge badge-accent" style={{ marginLeft: 'var(--space-2)' }}>+ Unlimited Memotive flashcards</span>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <div style={{

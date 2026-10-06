@@ -1,0 +1,103 @@
+/* Memotive export — always light, paper-like, in both app themes. */
+.mm-print {
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-accent: #1d4ed8;
+    min-height: 100vh;
+    background: #ffffff;
+    color: #0f172a;
+    padding: 32px;
+    max-width: 960px;
+    margin: 0 auto;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.mm-print-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.mm-print h1 {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.mm-print-bar p,
+.mm-print-tip {
+    color: #64748b;
+    margin: 4px 0 0;
+}
+
+.mm-print-tip {
+    margin-bottom: 24px;
+}
+
+.mm-print-deck {
+    margin-bottom: 28px;
+}
+
+.mm-print-deck h2 {
+    font-size: 18px;
+    font-weight: 700;
+    border-bottom: 2px solid #1d4ed8;
+    padding-bottom: 4px;
+    margin-bottom: 8px;
+}
+
+.mm-print table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.mm-print td {
+    border: 1px solid #e2e8f0;
+    padding: 8px 10px;
+    vertical-align: top;
+    width: 48%;
+}
+
+.mm-print td.num {
+    width: 32px;
+    color: #94a3b8;
+    text-align: right;
+}
+
+.mm-print img {
+    max-width: 100%;
+    max-height: 240px;
+}
+
+.mm-print .extra {
+    margin-top: 6px;
+    color: #475569;
+    font-size: 13px;
+}
+
+@media print {
+    html, body {
+        background: #ffffff !important;
+    }
+
+    .mm-print {
+        padding: 0;
+        max-width: none;
+    }
+
+    .mm-print-bar button,
+    .mm-print-tip {
+        display: none;
+    }
+
+    .mm-print tr {
+        break-inside: avoid;
+    }
+
+    .mm-print-deck h2 {
+        break-after: avoid;
+    }
+}
