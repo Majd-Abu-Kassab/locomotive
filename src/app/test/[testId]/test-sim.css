@@ -83,6 +83,15 @@
     border-radius: var(--radius-lg);
 }
 
+.test-question-image {
+    display: block;
+    max-width: 100%;
+    max-height: 420px;
+    margin-top: var(--space-4);
+    border-radius: var(--radius-md);
+    object-fit: contain;
+}
+
 /* Options */
 .test-options {
     display: flex;
@@ -137,6 +146,129 @@
     background: var(--brand-accent);
     border-color: var(--brand-accent);
     color: white;
+}
+
+/* Review mode (after submitting) */
+.test-option.review {
+    cursor: default;
+}
+
+.test-option.review:hover {
+    border-color: var(--border-primary);
+    background: var(--bg-card);
+}
+
+.test-option.review.correct,
+.test-option.review.correct:hover {
+    border-color: var(--color-success);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.test-option.review.incorrect,
+.test-option.review.incorrect:hover {
+    border-color: var(--color-danger);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.test-option.review.correct .test-option-letter {
+    background: var(--color-success);
+    border-color: var(--color-success);
+    color: white;
+}
+
+.test-option.review.incorrect .test-option-letter {
+    background: var(--color-danger);
+    border-color: var(--color-danger);
+    color: white;
+}
+
+.test-option-tag {
+    margin-left: auto;
+    padding-left: var(--space-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.test-option.correct .test-option-tag {
+    color: var(--color-success);
+}
+
+.test-option.incorrect .test-option-tag {
+    color: var(--color-danger);
+}
+
+.test-review-verdict {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+}
+
+.test-review-verdict.correct {
+    color: var(--color-success);
+}
+
+.test-review-verdict.incorrect {
+    color: var(--color-danger);
+}
+
+.test-review-verdict.unanswered {
+    color: var(--text-secondary);
+}
+
+.test-review-flag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-weight: 500;
+    color: var(--color-warning);
+}
+
+.test-explanation {
+    padding: var(--space-4) var(--space-5);
+    margin-bottom: var(--space-3);
+    background: var(--bg-card);
+    border: 1px solid var(--border-primary);
+    border-left: 3px solid var(--brand-accent);
+    border-radius: var(--radius-lg);
+    line-height: 1.7;
+}
+
+.test-explanation-label {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    margin-bottom: var(--space-2);
+}
+
+.test-review-score {
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding: var(--space-2) var(--space-4);
+    background: var(--bg-glass);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-primary);
+    color: var(--brand-accent-light);
+}
+
+.test-review-score span {
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    color: var(--text-tertiary);
+}
+
+.results-q-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
 }
 
 /* Actions */
@@ -254,6 +386,14 @@
     background: rgba(245, 158, 11, 0.4);
 }
 
+.legend-dot.correct {
+    background: rgba(16, 185, 129, 0.4);
+}
+
+.legend-dot.incorrect {
+    background: rgba(239, 68, 68, 0.4);
+}
+
 .legend-dot.unanswered {
     background: var(--bg-glass);
     border: 1px solid var(--border-primary);
@@ -353,6 +493,75 @@
     color: var(--text-secondary);
 }
 
+/* ═══ Wide screens: split view ═══
+   Question on the left, answers on the right. The page is pinned to the
+   viewport and each pane scrolls on its own, so the options and Next stay
+   on screen however long the question is. */
+@media (min-width: 1024px) {
+    .test-sim {
+        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
+    }
+
+    .test-body {
+        min-height: 0;
+        max-width: 1440px;
+        padding: var(--space-6) var(--space-8);
+    }
+
+    .test-question-area {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+        column-gap: var(--space-8);
+        min-height: 0;
+    }
+
+    .test-question-header {
+        grid-column: 1 / -1;
+        margin-bottom: var(--space-4);
+    }
+
+    /* Room for the selected option's glow, which overflow would clip */
+    .test-pane {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 6px;
+        margin: -6px;
+    }
+
+    .test-pane-answers {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .test-pane-scroll {
+        flex: 1;
+    }
+
+    .test-question-stem {
+        margin-bottom: 0;
+    }
+
+    .test-question-actions {
+        margin-bottom: 0;
+    }
+
+    .test-nav-buttons {
+        padding-top: var(--space-4);
+        margin-top: var(--space-2);
+        border-top: 1px solid var(--border-primary);
+    }
+
+    .test-notes-panel {
+        position: static;
+        max-height: 100%;
+        overflow-y: auto;
+    }
+}
+
 /* ═══ Mobile ═══ */
 @media (max-width: 768px) {
     .test-topbar {
@@ -367,6 +576,20 @@
     .test-timer {
         font-size: var(--fs-lg);
         padding: var(--space-1) var(--space-3);
+    }
+
+    .test-review-score {
+        font-size: var(--fs-base);
+        padding: var(--space-1) var(--space-3);
+    }
+
+    .test-review-score span {
+        display: none;
+    }
+
+    /* Keep the answer row readable; the tick/cross in the letter circle says it */
+    .test-option-tag {
+        display: none;
     }
 
     /* Stack the question area and notes panel vertically */

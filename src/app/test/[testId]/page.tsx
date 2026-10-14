@@ -3,14 +3,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-    Clock, Flag, FlagOff, AlertTriangle, StickyNote, ChevronLeft, ChevronRight, Send, X, Loader2
+    Clock, Flag, FlagOff, AlertTriangle, StickyNote, ChevronLeft, ChevronRight, Send, X, Loader2,
+    ArrowLeft, Check, Eye
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { saveTestResult, saveTestAnswers, QuestionRow, getQuestions } from '@/lib/api';
 import { RichTextPreview } from '@/components/RichTextEditor';
-import AddQuestionToMemotive from '@/components/memotive/AddQuestionToMemotive';
 import './test-sim.css';
 
 type AnswerState = { [qIndex: number]: number | null };
@@ -34,6 +34,8 @@ export default function TestSimulationPage() {
     const [showReport, setShowReport] = useState(false);
     const [timeLeft, setTimeLeft] = useState(100 * 60);
     const [submitted, setSubmitted] = useState(false);
+    // After submitting: false = results summary, true = walking back through the exam
+    const [reviewing, setReviewing] = useState(false);
     const [perQuestionTimer, setPerQuestionTimer] = useState(false);
     const [highlightMode, setHighlightMode] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -186,6 +188,22 @@ export default function TestSimulationPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [perQuestionTimer, submitted, timeLeft, currentQ, questions.length]);
 
+    // Start every question at the top: the page on phones, and both panes of
+    // the desktop split view (which scroll on their own).
+    const questionPaneRef = useRef<HTMLDivElement>(null);
+    const answersPaneRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        window.scrollTo(0, 0);
+        questionPaneRef.current?.scrollTo(0, 0);
+        answersPaneRef.current?.scrollTo(0, 0);
+    }, [reviewing, currentQ]);
+
+    const openReview = (qIndex: number) => {
+        setCurrentQ(qIndex);
+        setHighlightMode(false);
+        setReviewing(true);
+    };
+
     const getScore = () => {
         let correct = 0, incorrect = 0, unanswered = 0;
         questions.forEach((q, i) => {
@@ -240,7 +258,7 @@ export default function TestSimulationPage() {
     const q = questions[currentQ];
     const result = submitted ? getScore() : null;
 
-    if (submitted && result) {
+    if (submitted && result && !reviewing) {
         return (
             <div className="test-results-page">
                 <div className="test-results-card animate-scale-in">
@@ -296,49 +314,32 @@ export default function TestSimulationPage() {
                         </div>
                     </div>
 
-                    {/* Review questions */}
-                    <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-4)' }}>Review</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', maxHeight: '400px', overflowY: 'auto' }}>
-                        {questions.map((question, i) => {
-                            const userAnswer = answers[i];
-                            const isCorrect = userAnswer === question.correct_answer;
-                            return (
-                                <div key={i} className="card-glass" style={{ padding: 'var(--space-4)' }}>
-                                    <div style={{ display: 'flex', alignItems: 'start', gap: 'var(--space-3)' }}>
-                                        <span style={{
-                                            width: 24, height: 24, borderRadius: '50%', fontSize: 'var(--fs-xs)', fontWeight: 600,
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                                            background: userAnswer === null || userAnswer === undefined ? 'var(--gray-700)' : isCorrect ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
-                                            color: userAnswer === null || userAnswer === undefined ? 'var(--text-tertiary)' : isCorrect ? 'var(--color-success)' : 'var(--color-danger)',
-                                        }}>
-                                            {i + 1}
-                                        </span>
-                                        <div style={{ flex: 1 }}>
-                                            <p style={{ fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-2)' }}><RichTextPreview text={question.stem} /></p>
-                                            <p style={{ fontSize: 'var(--fs-xs)', color: isCorrect ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                                                {userAnswer === null || userAnswer === undefined
-                                                    ? 'Unanswered'
-                                                    : isCorrect ? '✓ Correct' : <>✗ Your answer: <RichTextPreview text={String(question.options[userAnswer!])} /></>}
-                                            </p>
-                                            {!isCorrect && <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-success)', marginTop: '2px' }}>
-                                                Correct: <RichTextPreview text={String(question.options[question.correct_answer])} />
-                                            </p>}
-                                            <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)', fontStyle: 'italic' }}>
-                                                <RichTextPreview text={question.explanation || ''} />
-                                            </p>
-                                            <AddQuestionToMemotive question={question} />
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                    {/* Review entry: jump to any question, or step through the whole exam */}
+                    <h3 style={{ fontSize: 'var(--fs-md)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Review your exam</h3>
+                    <p className="text-secondary" style={{ fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-4)' }}>
+                        Go back through every question with your answer, the correct answer and the explanation. Tap a number to jump straight to it.
+                    </p>
+                    <div className="results-q-grid">
+                        {questions.map((_, i) => (
+                            <button
+                                key={i}
+                                className={`test-q-btn ${getQuestionStatus(i)}`}
+                                onClick={() => openReview(i)}
+                                title={`Review question ${i + 1}`}
+                            >
+                                {i + 1}
+                            </button>
+                        ))}
                     </div>
+                    <button className="btn btn-primary btn-lg" style={{ width: '100%', marginTop: 'var(--space-4)' }} onClick={() => openReview(0)}>
+                        <Eye size={18} /> Review Exam
+                    </button>
 
                     <div style={{ display: 'flex', gap: 'var(--space-4)', marginTop: 'var(--space-8)' }}>
                         <button className="btn btn-secondary btn-lg" style={{ flex: 1 }} onClick={() => router.push('/dashboard')}>
                             Back to Dashboard
                         </button>
-                        <button className="btn btn-primary btn-lg" style={{ flex: 1 }} onClick={() => router.push('/create-test')}>
+                        <button className="btn btn-secondary btn-lg" style={{ flex: 1 }} onClick={() => router.push('/create-test')}>
                             Take Another Test
                         </button>
                     </div>
@@ -347,41 +348,62 @@ export default function TestSimulationPage() {
         );
     }
 
+    // Past the results screen, a submitted test is always being reviewed:
+    // same exam layout, read-only, with the marking and explanations shown.
+    const review = submitted;
+    const userAnswer = answers[currentQ];
+    const verdict = review ? getQuestionStatus(currentQ) : null;
+
     return (
         <div className="test-sim">
             {/* Top Bar */}
             <div className="test-topbar">
                 <div className="test-topbar-left">
-                    <button className="btn btn-ghost btn-sm" onClick={() => router.push('/dashboard')}>
-                        <X size={16} /> Exit
-                    </button>
-                    <span className="test-title">{testName}</span>
+                    {review ? (
+                        <button className="btn btn-ghost btn-sm" onClick={() => setReviewing(false)}>
+                            <ArrowLeft size={16} /> Results
+                        </button>
+                    ) : (
+                        <button className="btn btn-ghost btn-sm" onClick={() => router.push('/dashboard')}>
+                            <X size={16} /> Exit
+                        </button>
+                    )}
+                    <span className="test-title">{review ? `${testName} · Review` : testName}</span>
                 </div>
-                {testMode === 'timed' && (
+                {review && result && (
+                    <div className="test-review-score">
+                        {result.score.toFixed(1)} <span>/ {result.maxScore.toFixed(1)}</span>
+                    </div>
+                )}
+                {!review && testMode === 'timed' && (
                     <div className="test-timer" style={{ color: (perQuestionTimer ? timeLeft <= 10 : timeLeft < 300) ? 'var(--color-danger)' : (perQuestionTimer && timeLeft <= 30) ? 'var(--color-warning)' : 'var(--text-primary)' }}>
                         <Clock size={18} style={{ animation: perQuestionTimer && timeLeft <= 10 ? 'pulse 1s infinite' : 'none' }} />
                         <span>{perQuestionTimer ? `${timeLeft}s` : formatTime(timeLeft)}</span>
                     </div>
                 )}
                 <div className="test-topbar-right">
-                    <button
-                        className={`btn btn-sm ${highlightMode ? 'btn-primary' : 'btn-ghost'}`}
-                        onClick={() => setHighlightMode(!highlightMode)}
-                        title="Highlight Mode"
-                    >
-                        🖍️ Highlight
-                    </button>
+                    {!review && (
+                        <button
+                            className={`btn btn-sm ${highlightMode ? 'btn-primary' : 'btn-ghost'}`}
+                            onClick={() => setHighlightMode(!highlightMode)}
+                            title="Highlight Mode"
+                        >
+                            🖍️ Highlight
+                        </button>
+                    )}
                     <button className="btn btn-ghost btn-sm" onClick={() => setShowNotes(!showNotes)}>
                         <StickyNote size={16} /> Notes
                     </button>
                     <button className="btn btn-ghost btn-sm" onClick={() => setShowReport(true)}>
                         <AlertTriangle size={16} /> Report
                     </button>
-                    <button className="btn btn-primary btn-sm" onClick={handleSubmit}>
-                        <Send size={16} /> Submit
-                    </button>
+                    {!review && (
+                        <button className="btn btn-primary btn-sm" onClick={handleSubmit}>
+                            <Send size={16} /> Submit
+                        </button>
+                    )}
                 </div>
-                {perQuestionTimer && (
+                {!review && perQuestionTimer && (
                     <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: 'var(--border-primary)' }}>
                         <div style={{
                             height: '100%',
@@ -408,34 +430,77 @@ export default function TestSimulationPage() {
                         </div>
                     </div>
 
-                    <div className="test-question-stem"><RichTextPreview text={q.stem} /></div>
+                    {/* On wide screens these two panes sit side by side (see test-sim.css) */}
+                    <div className="test-pane test-pane-question" ref={questionPaneRef}>
+                        {verdict && (
+                            <div className={`test-review-verdict ${verdict}`}>
+                                {verdict === 'correct' ? 'Correct · +1.5' : verdict === 'incorrect' ? 'Incorrect · −0.4' : 'Unanswered · 0'}
+                                {marked[currentQ] && <span className="test-review-flag"><Flag size={12} /> You flagged this one</span>}
+                            </div>
+                        )}
 
-                    <div className="test-options">
-                        {q.options.map((opt, i) => (
-                            <button
-                                key={i}
-                                className={`test-option ${answers[currentQ] === i ? 'selected' : ''}`}
-                                onClick={() => selectAnswer(currentQ, i)}
-                            >
-                                <span className="test-option-letter">{String.fromCharCode(65 + i)}</span>
-                                <span><RichTextPreview text={typeof opt === 'string' && opt.match(/^[A-E]\) /) ? opt.substring(3) : String(opt)} /></span>
+                        <div className="test-question-stem">
+                            <RichTextPreview text={q.stem} />
+                            {q.image_url && (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img className="test-question-image" src={q.image_url} alt="Question diagram" />
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="test-pane-answers">
+                        <div className="test-pane test-pane-scroll" ref={answersPaneRef}>
+                            <div className="test-options">
+                                {q.options.map((opt, i) => {
+                                    const isKey = review && i === q.correct_answer;
+                                    const isWrongPick = review && i === userAnswer && i !== q.correct_answer;
+                                    const reviewClass = review ? `review ${isKey ? 'correct' : ''} ${isWrongPick ? 'incorrect' : ''}` : '';
+                                    return (
+                                        <button
+                                            key={i}
+                                            className={`test-option ${!review && userAnswer === i ? 'selected' : ''} ${reviewClass}`}
+                                            onClick={() => selectAnswer(currentQ, i)}
+                                            disabled={review}
+                                        >
+                                            <span className="test-option-letter">
+                                                {isKey ? <Check size={16} /> : isWrongPick ? <X size={16} /> : String.fromCharCode(65 + i)}
+                                            </span>
+                                            <span><RichTextPreview text={typeof opt === 'string' && opt.match(/^[A-E]\) /) ? opt.substring(3) : String(opt)} /></span>
+                                            {isKey && (
+                                                <span className="test-option-tag">{userAnswer === i ? 'Your answer · Correct' : 'Correct answer'}</span>
+                                            )}
+                                            {isWrongPick && <span className="test-option-tag">Your answer</span>}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {review ? (
+                                q.explanation && (
+                                    <div className="test-question-actions">
+                                        <div className="test-explanation">
+                                            <div className="test-explanation-label">Explanation</div>
+                                            <RichTextPreview text={q.explanation} />
+                                        </div>
+                                    </div>
+                                )
+                            ) : (
+                                <div className="test-question-actions">
+                                    <button className={`btn btn-sm ${marked[currentQ] ? 'btn-primary' : 'btn-ghost'}`} onClick={() => toggleMark(currentQ)}>
+                                        {marked[currentQ] ? <><FlagOff size={14} /> Unmark</> : <><Flag size={14} /> Mark for Review</>}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="test-nav-buttons">
+                            <button className="btn btn-secondary" disabled={currentQ === 0} onClick={() => setCurrentQ(prev => prev - 1)}>
+                                <ChevronLeft size={16} /> Previous
                             </button>
-                        ))}
-                    </div>
-
-                    <div className="test-question-actions">
-                        <button className={`btn btn-sm ${marked[currentQ] ? 'btn-primary' : 'btn-ghost'}`} onClick={() => toggleMark(currentQ)}>
-                            {marked[currentQ] ? <><FlagOff size={14} /> Unmark</> : <><Flag size={14} /> Mark for Review</>}
-                        </button>
-                    </div>
-
-                    <div className="test-nav-buttons">
-                        <button className="btn btn-secondary" disabled={currentQ === 0} onClick={() => setCurrentQ(prev => prev - 1)}>
-                            <ChevronLeft size={16} /> Previous
-                        </button>
-                        <button className="btn btn-primary" disabled={currentQ === questions.length - 1} onClick={() => setCurrentQ(prev => prev + 1)}>
-                            Next <ChevronRight size={16} />
-                        </button>
+                            <button className="btn btn-primary" disabled={currentQ === questions.length - 1} onClick={() => setCurrentQ(prev => prev + 1)}>
+                                Next <ChevronRight size={16} />
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -470,9 +535,19 @@ export default function TestSimulationPage() {
                     ))}
                 </div>
                 <div className="test-q-legend">
-                    <span><span className="legend-dot answered" /> Answered</span>
-                    <span><span className="legend-dot marked" /> Marked</span>
-                    <span><span className="legend-dot unanswered" /> Unanswered</span>
+                    {review ? (
+                        <>
+                            <span><span className="legend-dot correct" /> Correct</span>
+                            <span><span className="legend-dot incorrect" /> Incorrect</span>
+                            <span><span className="legend-dot unanswered" /> Unanswered</span>
+                        </>
+                    ) : (
+                        <>
+                            <span><span className="legend-dot answered" /> Answered</span>
+                            <span><span className="legend-dot marked" /> Marked</span>
+                            <span><span className="legend-dot unanswered" /> Unanswered</span>
+                        </>
+                    )}
                 </div>
             </div>
 

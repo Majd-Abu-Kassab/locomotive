@@ -616,8 +616,3 @@
 .mm-toolbar .select {
     width: auto;
 }
-
-/* ----- Add-to-Memotive button (test review) ----- */
-.mm-add-from-q {
-    margin-top: var(--space-2);
-}
