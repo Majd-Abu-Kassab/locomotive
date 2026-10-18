@@ -364,8 +364,8 @@ export default function TestSimulationPage() {
                             <ArrowLeft size={16} /> Results
                         </button>
                     ) : (
-                        <button className="btn btn-ghost btn-sm" onClick={() => router.push('/dashboard')}>
-                            <X size={16} /> Exit
+                        <button className="btn btn-ghost btn-sm" onClick={() => router.push('/dashboard')} aria-label="Exit" title="Exit">
+                            <X size={16} /> <span className="test-btn-label">Exit</span>
                         </button>
                     )}
                     <span className="test-title">{review ? `${testName} · Review` : testName}</span>
@@ -387,15 +387,16 @@ export default function TestSimulationPage() {
                             className={`btn btn-sm ${highlightMode ? 'btn-primary' : 'btn-ghost'}`}
                             onClick={() => setHighlightMode(!highlightMode)}
                             title="Highlight Mode"
+                            aria-label="Highlight mode"
                         >
-                            🖍️ Highlight
+                            🖍️ <span className="test-btn-label">Highlight</span>
                         </button>
                     )}
-                    <button className="btn btn-ghost btn-sm" onClick={() => setShowNotes(!showNotes)}>
-                        <StickyNote size={16} /> Notes
+                    <button className="btn btn-ghost btn-sm" onClick={() => setShowNotes(!showNotes)} aria-label="Notes" title="Notes">
+                        <StickyNote size={16} /> <span className="test-btn-label">Notes</span>
                     </button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setShowReport(true)}>
-                        <AlertTriangle size={16} /> Report
+                    <button className="btn btn-ghost btn-sm" onClick={() => setShowReport(true)} aria-label="Report a problem" title="Report a problem">
+                        <AlertTriangle size={16} /> <span className="test-btn-label">Report</span>
                     </button>
                     {!review && (
                         <button className="btn btn-primary btn-sm" onClick={handleSubmit}>

@@ -8,9 +8,9 @@ import { useMemotive } from '@/contexts/MemotiveContext';
 import MemotiveApp from './MemotiveApp';
 import './memotive.css';
 
-// No bubble on public pages, during tests/quizzes (/test/…), or on
-// Memotive's own pages.
-const HIDDEN = /^\/(login|register|forgot-password|reset-password|auth|test|memotive)(\/|$)/;
+// No bubble on public pages or on Memotive's own pages. It does show during
+// tests and quizzes; the exam's question bar leaves room for it (test-sim.css).
+const HIDDEN = /^\/(login|register|forgot-password|reset-password|auth|memotive)(\/|$)/;
 
 /**
  * The floating Memotive bubble and its half-page panel. Mounted once in the
@@ -34,8 +34,8 @@ export default function MemotiveRoot() {
 
     const due = totalDue.total;
 
-    // While hidden (e.g. mid-test) the panel stays mounted so its state
-    // is still there afterwards.
+    // While hidden (e.g. on the full /memotive page) the panel stays mounted
+    // so its state is still there afterwards.
     return (
         <div style={hidden ? { display: 'none' } : undefined}>
             {panelOpen ? (
