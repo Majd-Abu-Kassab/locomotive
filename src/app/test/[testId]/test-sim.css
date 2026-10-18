@@ -5,6 +5,68 @@
     background: var(--bg-primary);
 }
 
+/* No selecting test text: nothing to copy, and no Copy / Look Up / Search
+   menu on a phone's long-press. The clipboard itself is blocked in page.tsx.
+   Highlight mode works by selecting, so it turns selection back on for the
+   question; typing boxes always keep it (iOS won't let you type otherwise). */
+.test-sim,
+.test-results-page {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+.test-sim.highlighting .test-question-area,
+.test-sim textarea,
+.test-sim input {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* Black screen while the test window isn't in front or a screenshot key is
+   held. Above everything on the page (Memotive panel, modals) except toasts. */
+.test-shield {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    background: #000;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding: var(--space-6);
+    text-align: center;
+}
+
+.test-shield strong {
+    font-size: var(--fs-xl);
+}
+
+.test-shield span {
+    max-width: 360px;
+    color: #a1a1aa;
+}
+
+/* Printing a test (browser menu, or Ctrl/Cmd+P if the browser ignores our
+   block) prints only this notice. Scoped to the test page with :has() since
+   Next keeps a page's CSS loaded after you navigate away, and Memotive's
+   own print page must keep working. */
+@media print {
+    body:has(.test-sim, .test-results-page) * {
+        display: none !important;
+    }
+
+    body:has(.test-sim, .test-results-page)::before {
+        content: "Printing is turned off during tests.";
+        display: block;
+        padding: 48px;
+        font: 600 20px/1.4 sans-serif;
+        color: #000;
+    }
+}
+
 /* Top Bar */
 .test-topbar {
     display: flex;

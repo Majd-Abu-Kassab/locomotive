@@ -4,13 +4,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
     Clock, Flag, FlagOff, AlertTriangle, StickyNote, ChevronLeft, ChevronRight, Send, X, Loader2,
-    ArrowLeft, Check, Eye
+    ArrowLeft, Check, Eye, EyeOff
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { saveTestResult, saveTestAnswers, QuestionRow, getQuestions } from '@/lib/api';
 import { RichTextPreview } from '@/components/RichTextEditor';
+import { useToast } from '@/components/Toast';
 import './test-sim.css';
 
 type AnswerState = { [qIndex: number]: number | null };
@@ -22,6 +23,7 @@ export default function TestSimulationPage() {
     const { user } = useAuth();
     const supabase = useSupabase();
     const { getSignal } = useAbortController();
+    const { addToast } = useToast();
     const [questions, setQuestions] = useState<QuestionRow[]>([]);
     const [testMode, setTestMode] = useState<'timed' | 'untimed'>('timed');
     const [testName, setTestName] = useState('Practice Test');
@@ -86,6 +88,86 @@ export default function TestSimulationPage() {
         }
         load();
     }, [supabase, getSignal]);
+
+    // No copying questions out or pasting answers in, for as long as the test
+    // page is open (exam, results and review). Covers keyboard shortcuts,
+    // menus, right-click and dragging text. The Memotive panel, which can be
+    // open alongside, keeps normal clipboard use for the student's own cards.
+    // Selection itself is switched off in test-sim.css, except in highlight mode.
+    const lastBlockToastRef = useRef(0);
+    const notifyBlocked = useCallback((message: string) => {
+        const now = Date.now();
+        if (now - lastBlockToastRef.current > 3000) {
+            lastBlockToastRef.current = now;
+            addToast(message, 'warning');
+        }
+    }, [addToast]);
+    useEffect(() => {
+        const inMemotive = (target: EventTarget | null) => {
+            const el = target instanceof Element ? target : (target as Node | null)?.parentElement;
+            return !!el?.closest('.mm-panel');
+        };
+        const block = (e: Event) => {
+            if (inMemotive(e.target)) return;
+            e.preventDefault();
+            if (e.type === 'copy' || e.type === 'cut' || e.type === 'paste') {
+                notifyBlocked('Copying and pasting are turned off during tests.');
+            }
+        };
+        const events = ['copy', 'cut', 'paste', 'contextmenu', 'dragstart', 'drop'];
+        events.forEach(type => document.addEventListener(type, block));
+        return () => events.forEach(type => document.removeEventListener(type, block));
+    }, [notifyBlocked]);
+
+    // Screen shield: black out the test whenever its window isn't in front
+    // (another app or tab, or a screenshot tool taking focus), and while the
+    // Windows/Cmd key is held, since that key starts most desktop screenshot
+    // shortcuts (Win+Shift+S, Cmd+Shift+3/4/5) and the page sees it first.
+    // The timer keeps running, so leaving to look something up costs time.
+    // Phone screenshot buttons never reach a web page, so those can't be stopped.
+    // Printing is blocked here (Ctrl/Cmd+P) and in test-sim.css (browser menu).
+    const [away, setAway] = useState(false);
+    const [screenshotKey, setScreenshotKey] = useState(false);
+    useEffect(() => {
+        const isOsKey = (e: KeyboardEvent) => e.key === 'Meta' || e.key === 'OS';
+        const onBlur = () => setAway(true);
+        const onFocus = () => { setAway(false); setScreenshotKey(false); };
+        const onVisibility = () => { if (document.hidden) setAway(true); };
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (isOsKey(e)) setScreenshotKey(true);
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+                e.preventDefault();
+                notifyBlocked('Printing is turned off during tests.');
+            }
+        };
+        const onKeyUp = (e: KeyboardEvent) => {
+            if (isOsKey(e)) setScreenshotKey(false);
+            // Print Screen only reaches the page after the capture, so the
+            // most we can do is overwrite a full-screen copy on the clipboard.
+            if (e.key === 'PrintScreen') {
+                navigator.clipboard?.writeText('').catch(() => {});
+                notifyBlocked('Screenshots aren’t allowed during tests.');
+            }
+        };
+        // If the key-up got lost (focus moved mid-shortcut), the next pointer
+        // movement without the key held clears the shield.
+        const onPointerMove = (e: PointerEvent) => { if (!e.metaKey) setScreenshotKey(false); };
+
+        window.addEventListener('blur', onBlur);
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onVisibility);
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+        window.addEventListener('pointermove', onPointerMove);
+        return () => {
+            window.removeEventListener('blur', onBlur);
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onVisibility);
+            window.removeEventListener('keydown', onKeyDown);
+            window.removeEventListener('keyup', onKeyUp);
+            window.removeEventListener('pointermove', onPointerMove);
+        };
+    }, [notifyBlocked]);
 
     // Timer
     useEffect(() => {
@@ -355,7 +437,21 @@ export default function TestSimulationPage() {
     const verdict = review ? getQuestionStatus(currentQ) : null;
 
     return (
-        <div className="test-sim">
+        <div className={`test-sim ${highlightMode ? 'highlighting' : ''}`}>
+            {(away || screenshotKey) && (
+                <div className="test-shield" role="alert">
+                    <EyeOff size={36} />
+                    <strong>Test hidden</strong>
+                    <span>
+                        {screenshotKey
+                            ? 'Screenshots aren’t allowed during tests. Let go of the key to continue.'
+                            : review
+                                ? 'Come back to this window to keep reviewing.'
+                                : 'Come back to this window to continue. Your timer is still running.'}
+                    </span>
+                </div>
+            )}
+
             {/* Top Bar */}
             <div className="test-topbar">
                 <div className="test-topbar-left">
