@@ -591,31 +591,3 @@ export const milestones = [
     { id: 'm6', title: '💎 Perfect Score', description: 'Get 100% on any subject test', unlocked: false, dateUnlocked: null },
     { id: 'm7', title: '🚀 Marathon Runner', description: 'Complete 10 practice tests', unlocked: false, dateUnlocked: null },
 ];
-
-// ===== FAQ DATA =====
-export const faqItems = [
-    {
-        question: 'What is the IMAT exam?',
-        answer: 'The IMAT (International Medical Admissions Test) is an entrance exam required for English-taught medical programs in Italy. It consists of 60 questions to be answered in 100 minutes, covering Biology, Chemistry, Physics, Mathematics, Logic, and General Knowledge.',
-    },
-    {
-        question: 'How is the IMAT scored?',
-        answer: 'The IMAT uses a specific scoring system: +1.5 points for each correct answer, -0.4 points for each incorrect answer, and 0 points for unanswered questions. The maximum possible score is 90 points.',
-    },
-    {
-        question: 'What study materials are included?',
-        answer: 'LOCOMOTIVE includes video lectures, PDF resources, interactive quizzes, official IMAT past papers, Italian medical entrance exam questions translated to English, and our own original practice questions.',
-    },
-    {
-        question: 'Can I study offline?',
-        answer: 'Currently, LOCOMOTIVE requires an internet connection. We are working on offline mode for future releases.',
-    },
-    {
-        question: 'How do I upgrade my plan?',
-        answer: 'You can upgrade your plan by clicking the "Upgrade Plan" button in the sidebar or visiting the pricing page. We offer monthly and yearly subscription options.',
-    },
-    {
-        question: 'What is the difference between Timed and Untimed modes?',
-        answer: 'Timed mode simulates real IMAT conditions with a 100-minute countdown. Untimed mode allows you to practice at your own pace without time pressure.',
-    },
-];
