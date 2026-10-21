@@ -3,6 +3,8 @@
 // Each answer block is a paragraph (string) or a bulleted list (string[]).
 // Links use [label](url).
 
+import { INACTIVE_DELETE_MONTHS } from '@/lib/memotive/content';
+
 export type FaqBlock = string | string[];
 
 export interface FaqItem {
@@ -366,6 +368,19 @@ export const faqCategories: FaqCategory[] = [
                 answer: [
                     'No certificate is needed to sit the IMAT. The exam itself is in English, so it already tests your ability to work in the language, and most universities accept that.',
                     'Some universities may still ask non-native speakers for proof such as IELTS or TOEFL, especially if your previous education was not in English. Check your chosen university\'s language requirements.',
+                ],
+            },
+        ],
+    },
+    {
+        // Platform policy, not part of the client's IMAT FAQ document.
+        title: 'Memotive Flashcards',
+        items: [
+            {
+                question: 'Are my Memotive flashcards ever deleted?',
+                answer: [
+                    `Yes. If you don't sign in to LOCOMOTIVE for ${INACTIVE_DELETE_MONTHS} months, all your Memotive subjects and cards are deleted automatically, including their review history. This applies to every account, free or paid, and can't be undone.`,
+                    'To keep a copy, download a [PDF backup](/memotive/print) of all your cards anytime.',
                 ],
             },
         ],

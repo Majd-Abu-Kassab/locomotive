@@ -115,6 +115,10 @@
         padding: var(--space-2) var(--space-3);
     }
 
+    .mm-panel .mm-header .mm-notice {
+        margin-top: var(--space-1);
+    }
+
     .mm-panel .mm-open-page {
         display: none;
     }
@@ -160,6 +164,7 @@
 
 .mm-header {
     display: flex;
+    flex-wrap: wrap; /* lets the disclaimer take its own line under the title */
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-3) var(--space-4);
@@ -382,6 +387,27 @@
     gap: var(--space-2);
     flex-wrap: wrap;
     margin-top: var(--space-4);
+}
+
+/* Inactivity-deletion disclaimer: its own line under the title, in the header. */
+.mm-notice {
+    flex-basis: 100%;
+    display: flex;
+    gap: var(--space-2);
+    align-items: flex-start;
+    margin: 0;
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+    color: var(--text-tertiary);
+}
+
+.mm-notice svg {
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.mm-notice a {
+    color: var(--text-accent);
 }
 
 /* ----- Study ----- */

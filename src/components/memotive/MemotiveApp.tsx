@@ -3,12 +3,13 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import {
-    Brain, Plus, List, Settings, FileDown, Maximize2, X, Pencil, Trash2, Crown, CheckCircle2, Loader2, ArrowLeft,
+    Brain, Plus, List, Settings, FileDown, Maximize2, X, Pencil, Trash2, Crown, CheckCircle2, Loader2, ArrowLeft, Info,
 } from 'lucide-react';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useMemotive, DueCounts } from '@/contexts/MemotiveContext';
 import { useToast } from '@/components/Toast';
 import { renameDeck, deleteDeck, saveSettings, NoteRow, MemotiveSettings } from '@/lib/memotive/api';
+import { INACTIVE_DELETE_MONTHS } from '@/lib/memotive/content';
 import StudySession from './StudySession';
 import NoteEditor from './NoteEditor';
 import NoteBrowser from './NoteBrowser';
@@ -86,6 +87,7 @@ export default function MemotiveApp({ mode, onClose }: MemotiveAppProps) {
                         <button className="mm-icon-btn" onClick={onClose} title="Close" aria-label="Close Memotive"><X size={16} /></button>
                     </>
                 )}
+                {view.name === 'home' && <RetentionNotice />}
             </div>
             <div className="mm-body">{body}</div>
         </div>
@@ -100,6 +102,19 @@ function Counts({ c }: { c: DueCounts }) {
             <span className={cls(c.learn, 'mm-count-learn')}>{c.learn}</span>
             <span className={cls(c.review, 'mm-count-review')}>{c.review}</span>
         </div>
+    );
+}
+
+/** The inactivity-deletion disclaimer, with a way to keep a copy. */
+function RetentionNotice() {
+    return (
+        <p className="mm-notice">
+            <Info size={14} aria-hidden />
+            <span>
+                Cards are deleted automatically if you don’t sign in for {INACTIVE_DELETE_MONTHS} months.
+                Keep a copy anytime with the <a href="/memotive/print" target="_blank" rel="noopener">PDF backup</a>.
+            </span>
+        </p>
     );
 }
 

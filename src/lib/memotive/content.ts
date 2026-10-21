@@ -13,6 +13,13 @@ export const NOTE_TYPES: { value: NoteType; label: string; hint: string }[] = [
 
 export const FREE_NOTE_LIMIT = 10;
 
+/**
+ * Cards of students inactive this long are deleted by a nightly database
+ * job (supabase/memotive-inactive-cleanup.sql). Shown to students; keep the
+ * two in step.
+ */
+export const INACTIVE_DELETE_MONTHS = 3;
+
 export interface ClozeSegment {
     text: string;
     /** Cloze number for a deletion, null for plain text. */
