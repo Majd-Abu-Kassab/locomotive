@@ -2,6 +2,8 @@
 // Field text uses the same markup as questions (RichTextPreview): **bold**,
 // *italic*, ^{sup}, _{sub}, $math$, $$math$$, ![alt](url).
 
+import { toPlainText as richTextToPlain } from '@/lib/richText';
+
 export type NoteType = 'basic' | 'reversed' | 'type_in' | 'cloze';
 
 export const NOTE_TYPES: { value: NoteType; label: string; hint: string }[] = [
@@ -93,13 +95,7 @@ export function validateNote(noteType: NoteType, front: string, back: string): s
 
 /** Strip markup to plain text — for previews, search and type-in comparison. */
 export function toPlainText(text: string): string {
-    return parseCloze(text).map(s => s.text).join('')
-        .replace(/!\[[^\]]*\]\([^)]*\)/g, '[image]')
-        .replace(/\$\$?([^$]*)\$\$?/g, '$1')
-        .replace(/[\^_]\{([^}]*)\}/g, '$1')
-        .replace(/\*\*?([^*]+)\*\*?/g, '$1')
-        .replace(/\s+/g, ' ')
-        .trim();
+    return richTextToPlain(parseCloze(text).map(s => s.text).join(''));
 }
 
 export function answersMatch(typed: string, expected: string): boolean {

@@ -1,0 +1,82 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { createClient as createSupabaseServer } from '@/lib/supabase-server';
+
+// GET /api/lesson-media?lessonId=…
+// Lesson videos, PDFs and slides live in the private 'course-content' bucket.
+// Students never get a permanent address: after checking they're signed in
+// and allowed into the lesson, this returns a link that expires, so it can't
+// be shared or reused, and paid lessons can't be opened without access.
+export const dynamic = 'force-dynamic';
+
+const BUCKET = 'course-content';
+// Long enough for a long lecture with pauses. The video player asks for a
+// fresh link if one expires mid-video.
+const LINK_SECONDS = 2 * 60 * 60;
+
+const noStore = { 'Cache-Control': 'no-store' };
+
+// Lessons store the bucket's public-style URL from upload time:
+//   https://<project>.supabase.co/storage/v1/object/public/course-content/<path>
+function storagePath(contentUrl: string): string | null {
+    const marker = `/storage/v1/object/public/${BUCKET}/`;
+    const at = contentUrl.indexOf(marker);
+    if (at === -1) return null;
+    return decodeURIComponent(contentUrl.slice(at + marker.length).split('?')[0]);
+}
+
+export async function GET(req: NextRequest) {
+    const lessonId = req.nextUrl.searchParams.get('lessonId');
+    if (!lessonId) return NextResponse.json({ error: 'lessonId is required' }, { status: 400, headers: noStore });
+
+    const supabase = await createSupabaseServer();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: noStore });
+
+    // Service role: reads access tables and signs links regardless of RLS.
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+
+    try {
+        const { data: lesson } = await admin
+            .from('topics')
+            .select('id, module_id, content_url')
+            .eq('id', lessonId)
+            .maybeSingle();
+        if (!lesson?.content_url) return NextResponse.json({ error: 'No content' }, { status: 404, headers: noStore });
+
+        // Same rule as the lesson page: a module that's in no paid section is
+        // free; otherwise the student needs access to a section containing it.
+        // Staff can open everything.
+        const [{ data: sections }, { data: profile }] = await Promise.all([
+            admin.from('section_module_map').select('section_id').eq('module_id', lesson.module_id),
+            admin.from('profiles').select('admin_role').eq('id', user.id).maybeSingle(),
+        ]);
+        const sectionIds = (sections ?? []).map(s => s.section_id);
+        if (sectionIds.length > 0 && !profile?.admin_role) {
+            const { data: access } = await admin
+                .from('student_section_access')
+                .select('id')
+                .eq('user_id', user.id)
+                .in('section_id', sectionIds)
+                .in('status', ['active', 'free_grant'])
+                .limit(1);
+            if (!access?.length) return NextResponse.json({ error: 'Locked' }, { status: 403, headers: noStore });
+        }
+
+        const path = storagePath(lesson.content_url);
+        if (!path) {
+            // Not one of our uploads (e.g. an external link) — nothing to sign.
+            return NextResponse.json({ url: lesson.content_url }, { headers: noStore });
+        }
+
+        const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(path, LINK_SECONDS);
+        if (error || !data) {
+            console.error('lesson-media sign error:', error);
+            return NextResponse.json({ error: 'Could not load this file' }, { status: 500, headers: noStore });
+        }
+        return NextResponse.json({ url: data.signedUrl }, { headers: noStore });
+    } catch (err) {
+        console.error('lesson-media error:', err);
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: noStore });
+    }
+}

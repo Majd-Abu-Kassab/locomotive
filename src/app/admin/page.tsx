@@ -15,10 +15,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { isAbortError } from '@/hooks/useAbortController';
+import { toRichText, toPlainText } from '@/lib/richText';
 import {
     getCourses, getAllQuestions,
     adminSaveCourse, adminDeleteCourse,
-    adminSaveQuestion, adminDeleteQuestion, adminBulkImportQuestions,
+    adminSaveQuestion, adminDeleteQuestion, adminBulkImportQuestions, adminMoveQuestions,
     adminSaveSection, adminDeleteSection, adminAssignModulesToSection, adminUpdateCoursePaymentSettings,
     adminGetAllStudentAccess, adminGrantAccess, adminRevokeAccess,
     adminGetAllPayments, adminGetCoupons, adminSaveCoupon, adminToggleCoupon,
@@ -38,29 +39,46 @@ type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'anal
 // ── JSON question-import helpers ──
 interface ParsedItem { topic: string; stem: string; options: string[]; correct: number; explanation: string; }
 
-// Explanations sometimes arrive as HTML; convert to clean text so the
-// markdown/LaTeX renderer displays them correctly (we never store raw HTML).
-function stripHtml(input: string): string {
-    if (!input) return '';
-    return input
-        .replace(/<\s*br\s*\/?\s*>/gi, '\n')
-        .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
-        .replace(/<li[^>]*>/gi, '• ')
-        // Remove only recognized HTML tags — leave stray < > alone so math
-        // like "x < 5" in an explanation isn't mangled.
-        .replace(/<\/?(p|div|span|ul|ol|b|i|strong|em|u|a|blockquote|code|pre|table|tbody|thead|td|th|h[1-6]|img|figure|figcaption)(\s[^>]*)?\/?>/gi, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-}
 
 function slugify(s: string): string {
     return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'q';
+}
+
+// ── Placing questions in quizzes ──
+// A question belongs to one quiz lesson (topics.lesson_type === 'quiz'), or to
+// no quiz ("course bank only"). Lessons are labelled with their position so
+// two quizzes with the same name ("Weekly Test") can be told apart.
+interface QuizPlace { id: string; course: CourseWithModules; module: ModuleWithTopics; label: string; }
+
+function quizPlaces(courses: CourseWithModules[]): QuizPlace[] {
+    return courses.flatMap(course => course.modules.flatMap(module =>
+        module.topics
+            .map((t, i) => ({ t, label: `Lesson ${i + 1} · ${t.name}` }))
+            .filter(({ t }) => t.lesson_type === 'quiz')
+            .map(({ t, label }) => ({ id: t.id, course, module, label })),
+    ));
+}
+
+/** Quiz picker for one course, grouped by module. Empty value = course bank only. */
+function QuizSelect({ places, courseName, value, onChange, id }: {
+    places: QuizPlace[];
+    courseName: string;
+    value: string | null | undefined;
+    onChange: (lessonId: string | null) => void;
+    id?: string;
+}) {
+    const inCourse = places.filter(p => p.course.name === courseName);
+    const modules = [...new Map(inCourse.map(p => [p.module.id, p.module])).values()];
+    return (
+        <select id={id} className="select" value={value ?? ''} onChange={e => onChange(e.target.value || null)} disabled={!courseName}>
+            <option value="">No quiz — course question bank only</option>
+            {modules.map(m => (
+                <optgroup key={m.id} label={m.name}>
+                    {inCourse.filter(p => p.module.id === m.id).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </optgroup>
+            ))}
+        </select>
+    );
 }
 
 // Parse an uploaded JSON file into validated question items. Accepts an array
@@ -83,8 +101,10 @@ function parseQuestionJson(text: string): { items: ParsedItem[]; errors: string[
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         qs.forEach((q: any, i: number) => {
             const label = q?.title ? `"${q.title}"` : `Quiz ${qi + 1} Q${i + 1}`;
-            const stem = String(q?.content ?? q?.stem ?? '').trim();
-            const options = Array.isArray(q?.options) ? q.options.map((o: unknown) => String(o)) : [];
+            // Banks often arrive as HTML with \(…\) math; store the app's own
+            // markup instead (we never store raw HTML).
+            const stem = toRichText(String(q?.content ?? q?.stem ?? '').trim());
+            const options = Array.isArray(q?.options) ? q.options.map((o: unknown) => toRichText(String(o))) : [];
             const correct = Number(q?.correct ?? q?.correct_answer);
             if (!stem) { errors.push(`${label}: missing question text`); return; }
             if (options.length < 2) { errors.push(`${label}: needs at least 2 options`); return; }
@@ -92,7 +112,7 @@ function parseQuestionJson(text: string): { items: ParsedItem[]; errors: string[
                 errors.push(`${label}: "correct" index ${q?.correct} is out of range (0–${options.length - 1})`);
                 return;
             }
-            items.push({ topic, stem, options, correct, explanation: stripHtml(String(q?.explanation ?? '')) });
+            items.push({ topic, stem, options, correct, explanation: toRichText(String(q?.explanation ?? '')) });
         });
     });
     return { items, errors };
@@ -136,6 +156,12 @@ export default function AdminPage() {
     // course) and the source. Difficulty defaults to 'medium'.
     const [importOpen, setImportOpen] = useState(false);
     const [importCourseName, setImportCourseName] = useState('');
+    const [importLessonId, setImportLessonId] = useState<string | null>(null);
+    const [importDifficulty, setImportDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+    const [importSource, setImportSource] = useState<QuestionRow['source']>('official-imat');
+    // Questions tab: move the questions currently shown into a quiz.
+    const [moveTarget, setMoveTarget] = useState('');
+    const [moving, setMoving] = useState(false);
     const [importItems, setImportItems] = useState<ParsedItem[]>([]);
     const [importErrors, setImportErrors] = useState<string[]>([]);
     const [importFileName, setImportFileName] = useState('');
@@ -453,11 +479,13 @@ export default function AdminPage() {
             source: editingQuestion.source || 'locomotive-original',
             year: editingQuestion.year || null,
             image_url: editingQuestion.image_url || null,
+            lesson_id: editingQuestion.lesson_id || null,
         });
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Question saved!', 'success');
             setQuestions(await getAllQuestions(supabase));
             setEditingQuestion(null);
+            setCourses(await getCourses(supabase)); // quiz question counts
         }
         setSavingQuestion(false);
     };
@@ -467,6 +495,7 @@ export default function AdminPage() {
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Question deleted', 'success');
             setQuestions(prev => prev.filter(q => q.id !== qId));
+            setCourses(await getCourses(supabase)); // quiz question counts
         }
     };
 
@@ -492,20 +521,18 @@ export default function AdminPage() {
         setImporting(true);
         const rows = importItems.map((it, i) => ({
             id: `imp-${slugify(courseName)}-${slugify(it.topic)}-${i + 1}-${Math.random().toString(36).slice(2, 6)}`,
-            // subject links the question to its course (question.subject === course.name).
-            // source is a fixed provenance vocabulary — DB CHECK allows only
-            // 'official-imat' | 'locomotive-original' | 'italian-medical' — so it
-            // CANNOT be the course name. Default to the non-premium 'official-imat'
-            // so imported questions aren't hidden behind the premium filter.
-            // difficulty defaults to 'medium'.
+            // subject links the question to its course (question.subject === course.name);
+            // lesson_id puts it in a specific quiz (null = course bank only).
+            // source is a fixed provenance vocabulary (DB CHECK) chosen in the form.
             subject: courseName,
+            lesson_id: importLessonId,
             topic: it.topic,
-            difficulty: 'medium',
+            difficulty: importDifficulty,
             stem: it.stem,
             options: it.options,
             correct_answer: it.correct,
             explanation: it.explanation,
-            source: 'official-imat',
+            source: importSource,
             year: null,
         }));
         const { imported, error } = await adminBulkImportQuestions(supabase, rows);
@@ -518,6 +545,30 @@ export default function AdminPage() {
         setImportItems([]);
         setImportErrors([]);
         setImportFileName('');
+        // Quiz question counts are recalculated in the database; reload them.
+        setCourses(await getCourses(supabase));
+    };
+
+    // Move every question currently shown in the table into a quiz, or back to
+    // a course's bank. moveTarget is "quiz:<lessonId>" or "bank:<courseName>".
+    const handleMoveQuestions = async () => {
+        if (!moveTarget || filteredQuestions.length === 0) return;
+        const [kind, ref] = [moveTarget.slice(0, 4), moveTarget.slice(5)];
+        const place = kind === 'quiz' ? placeById.get(ref) : undefined;
+        const target = place
+            ? { subject: place.course.name, lessonId: place.id }
+            : { subject: ref, lessonId: null };
+        const where = place ? `${place.module.name} › ${place.label}` : `the ${ref} question bank (no quiz)`;
+        const n = filteredQuestions.length;
+        if (!confirm(`Move the ${n} question${n === 1 ? '' : 's'} shown to ${where}?`)) return;
+        setMoving(true);
+        const { error } = await adminMoveQuestions(supabase, filteredQuestions.map(q => q.id), target);
+        setMoving(false);
+        if (error) { addToast('Move failed: ' + error.message, 'error'); return; }
+        addToast(`Moved ${n} question${n === 1 ? '' : 's'} to ${where}.`, 'success');
+        setMoveTarget('');
+        setQuestions(await getAllQuestions(supabase));
+        setCourses(await getCourses(supabase));
     };
 
     const handleQuestionImageUpload = async (file: File): Promise<string | null> => {
@@ -647,6 +698,9 @@ export default function AdminPage() {
     const filteredQuestions = questionFilter
         ? questions.filter(q => q.subject.toLowerCase().includes(questionFilter.toLowerCase()) || q.topic.toLowerCase().includes(questionFilter.toLowerCase()) || q.stem.toLowerCase().includes(questionFilter.toLowerCase()))
         : questions;
+
+    const places = quizPlaces(courses);
+    const placeById = new Map(places.map(p => [p.id, p]));
 
     const filteredPayments = paymentFilter === 'all' ? payments : payments.filter(p => p.status === paymentFilter);
     const totalRevenue = payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
@@ -928,7 +982,8 @@ export default function AdminPage() {
                                                     <strong>{t.name}</strong>
                                                     <span className="badge" style={{ fontSize: 9 }}>{t.content_type}</span>
                                                 </span>
-                                                <a href={t.content_url!} target="_blank" rel="noopener noreferrer" className="text-accent" style={{ fontSize: 'var(--fs-xs)' }}>
+                                                {/* Files are private; the lesson page fetches a signed link. */}
+                                                <a href={`/courses/${encodeURIComponent(contentCourseId)}/${encodeURIComponent(t.id)}`} target="_blank" rel="noopener noreferrer" className="text-accent" style={{ fontSize: 'var(--fs-xs)' }}>
                                                     View ↗
                                                 </a>
                                             </div>
@@ -954,20 +1009,50 @@ export default function AdminPage() {
                                 </button>
                             </div>
                         </div>
+                        {filteredQuestions.length > 0 && (
+                            <div className="card" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)', marginBottom: 'var(--space-4)' }}>
+                                <span className="text-sm">
+                                    Move the <strong>{filteredQuestions.length}</strong> question{filteredQuestions.length === 1 ? '' : 's'} shown{questionFilter ? ' (filtered)' : ''} to:
+                                </span>
+                                <select className="select" value={moveTarget} onChange={e => setMoveTarget(e.target.value)} style={{ width: 'auto', minWidth: 260, flex: 1 }}>
+                                    <option value="">Choose a quiz…</option>
+                                    {courses.map(c => (
+                                        <optgroup key={c.id} label={c.name}>
+                                            <option value={`bank:${c.name}`}>No quiz — course question bank only</option>
+                                            {places.filter(p => p.course.id === c.id).map(p => (
+                                                <option key={p.id} value={`quiz:${p.id}`}>{p.module.name} › {p.label}</option>
+                                            ))}
+                                        </optgroup>
+                                    ))}
+                                </select>
+                                <button className="btn btn-primary btn-sm" onClick={handleMoveQuestions} disabled={!moveTarget || moving}>
+                                    {moving ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <FolderTree size={14} />} Move
+                                </button>
+                                <span className="text-xs text-secondary" style={{ flexBasis: '100%' }}>
+                                    Use the filter above to narrow down which questions move. A quiz with no questions of its own uses the whole course bank.
+                                </span>
+                            </div>
+                        )}
                         <div className="table-wrapper">
                             <table>
-                                <thead><tr><th>Subject</th><th>Topic</th><th style={{ maxWidth: 300 }}>Stem</th><th>Difficulty</th><th>Source</th><th>Actions</th></tr></thead>
+                                <thead><tr><th>Subject</th><th>Quiz</th><th>Topic</th><th style={{ maxWidth: 300 }}>Stem</th><th>Difficulty</th><th>Source</th><th>Actions</th></tr></thead>
                                 <tbody>
                                     {filteredQuestions.map(q => (
                                         <tr key={q.id}>
                                             <td style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{q.subject}</td>
+                                            <td className="text-sm" style={{ whiteSpace: 'nowrap' }}>
+                                                {q.lesson_id && placeById.get(q.lesson_id)
+                                                    ? <>{placeById.get(q.lesson_id)!.module.name} › {placeById.get(q.lesson_id)!.label}</>
+                                                    : <span className="text-secondary">Course bank</span>}
+                                            </td>
                                             <td className="text-secondary text-sm">{q.topic}</td>
-                                            <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.stem}</td>
+                                            <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{toPlainText(q.stem)}</td>
                                             <td><span className={`badge ${q.difficulty === 'easy' ? 'badge-accent' : q.difficulty === 'hard' ? 'badge-danger' : ''}`}>{q.difficulty}</span></td>
                                             <td className="text-xs text-secondary">{q.source}</td>
                                             <td>
                                                 <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                                                    <button className="btn btn-ghost btn-sm" onClick={() => setEditingQuestion(q)}><Edit3 size={14} /></button>
+                                                    {/* Open older HTML-imported questions in the app's markup, so saving cleans them up. */}
+                                                    <button className="btn btn-ghost btn-sm" onClick={() => setEditingQuestion({ ...q, stem: toRichText(q.stem), options: q.options.map(o => toRichText(String(o))), explanation: toRichText(q.explanation || '') })}><Edit3 size={14} /></button>
                                                     <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={() => handleDeleteQuestion(q.id)}><Trash2 size={14} /></button>
                                                 </div>
                                             </td>
@@ -1359,8 +1444,9 @@ export default function AdminPage() {
                             <div className="input-group"><label>ID</label><input className="input" value={editingQuestion.id || ''} onChange={e => setEditingQuestion({ ...editingQuestion, id: e.target.value })} placeholder="e.g. bio-gen-q99" /></div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
                                 <div className="input-group">
-                                    <label>Subject</label>
-                                    <select className="select" value={editingQuestion.subject || ''} onChange={e => setEditingQuestion({ ...editingQuestion, subject: e.target.value })}>
+                                    <label>Course</label>
+                                    {/* A quiz belongs to one course, so changing course clears the quiz. */}
+                                    <select className="select" value={editingQuestion.subject || ''} onChange={e => setEditingQuestion({ ...editingQuestion, subject: e.target.value, lesson_id: null })}>
                                         <option value="">Select...</option>
                                         {/* Subjects are driven by the actual courses — a question's subject
                                             must match a course name for that course's quizzes to find it.
@@ -1373,6 +1459,21 @@ export default function AdminPage() {
                                     </select>
                                 </div>
                                 <div className="input-group"><label>Topic</label><input className="input" value={editingQuestion.topic || ''} onChange={e => setEditingQuestion({ ...editingQuestion, topic: e.target.value })} placeholder="e.g. Genetics" /></div>
+                            </div>
+                            <div className="input-group">
+                                <label htmlFor="q-quiz">Module › Quiz</label>
+                                <QuizSelect
+                                    id="q-quiz"
+                                    places={places}
+                                    courseName={editingQuestion.subject || ''}
+                                    value={editingQuestion.lesson_id}
+                                    onChange={lessonId => setEditingQuestion({ ...editingQuestion, lesson_id: lessonId })}
+                                />
+                                <span className="text-xs text-secondary" style={{ marginTop: 4 }}>
+                                    {editingQuestion.subject
+                                        ? 'Every question is also in its course bank, used by Create Test.'
+                                        : 'Choose a course first.'}
+                                </span>
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)' }}>
                                 <div className="input-group">
@@ -1606,7 +1707,7 @@ export default function AdminPage() {
                                                         <tr key={q.id}>
                                                             <td style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{q.subject}</td>
                                                             <td className="text-secondary text-sm">{q.topic}</td>
-                                                            <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 'var(--fs-xs)' }}>{q.stem}</td>
+                                                            <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 'var(--fs-xs)' }}>{toPlainText(q.stem)}</td>
                                                             <td><span className={`badge ${q.difficulty === 'easy' ? 'badge-success' : q.difficulty === 'hard' ? 'badge-danger' : ''}`}>{q.difficulty}</span></td>
                                                             <td style={{ textAlign: 'center' }}>{q.totalAttempts}</td>
                                                             <td>
@@ -1984,7 +2085,7 @@ export default function AdminPage() {
 
                         <div className="input-group" style={{ marginBottom: 'var(--space-3)' }}>
                             <label>Course *</label>
-                            <select className="select" value={importCourseName} onChange={e => setImportCourseName(e.target.value)}>
+                            <select className="select" value={importCourseName} onChange={e => { setImportCourseName(e.target.value); setImportLessonId(null); }}>
                                 <option value="">Select a course…</option>
                                 {courses.map(c => (
                                     <option key={c.id} value={c.name}>{c.name}</option>
@@ -1992,8 +2093,32 @@ export default function AdminPage() {
                             </select>
                         </div>
 
+                        <div className="input-group" style={{ marginBottom: 'var(--space-3)' }}>
+                            <label htmlFor="import-quiz">Module › Quiz</label>
+                            <QuizSelect id="import-quiz" places={places} courseName={importCourseName} value={importLessonId} onChange={setImportLessonId} />
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+                            <div className="input-group">
+                                <label htmlFor="import-difficulty">Difficulty</label>
+                                <select id="import-difficulty" className="select" value={importDifficulty} onChange={e => setImportDifficulty(e.target.value as typeof importDifficulty)}>
+                                    <option value="easy">Easy</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="hard">Hard</option>
+                                </select>
+                            </div>
+                            <div className="input-group">
+                                <label htmlFor="import-source">Source</label>
+                                <select id="import-source" className="select" value={importSource} onChange={e => setImportSource(e.target.value as QuestionRow['source'])}>
+                                    <option value="official-imat">Official IMAT</option>
+                                    <option value="locomotive-original">LOCOMOTIVE</option>
+                                    <option value="italian-medical">Italian Medical</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <p className="text-xs text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
-                            Every question in the file is added to the selected course. Each quiz&apos;s <code>quiz_title</code> becomes the topic. HTML in explanations is converted to plain text.
+                            Every question in the file goes into the selected course{importLessonId ? ' and quiz' : ' bank'}, with this difficulty and source (each can be changed later per question). Each quiz&apos;s <code>quiz_title</code> becomes the topic. LOCOMOTIVE questions are only available to paid students in Create Test.
                         </p>
 
                         <input
@@ -2096,7 +2221,8 @@ export default function AdminPage() {
                                 </div>
                                 <div className="input-group">
                                     <label>Question Count</label>
-                                    <input className="input" type="number" value={editingTopic.question_count || 0} onChange={e => setEditingTopic({ ...editingTopic, question_count: parseInt(e.target.value) || 0 })} disabled={editingTopic.lesson_type !== 'quiz'} />
+                                    {/* Kept up to date by the database from the questions placed in this quiz. */}
+                                    <input className="input" type="number" value={editingTopic.question_count || 0} disabled title="Calculated automatically from the questions in this quiz" />
                                 </div>
                             </div>
                         </div>

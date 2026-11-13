@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react';
 import katex from 'katex';
 import { Bold, Italic, Subscript, Superscript, Image, Code, Radical } from 'lucide-react';
+import { toRichText } from '@/lib/richText';
 
 interface RichTextToolbarProps {
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -143,6 +144,8 @@ function renderMath(content: string, displayMode: boolean, key: number): React.R
  *   ^{text}   →  <sup>             _{text}   →  <sub>
  *   $math$    →  KaTeX inline      $$math$$  →  KaTeX display (centered)
  *   ![alt](url) → <img>
+ * Line breaks are kept. Imported HTML / \(…\) math is converted first
+ * (see toRichText), so question banks in that format display correctly.
  */
 export function RichTextPreview({ text }: { text: string }) {
     if (!text) return null;
@@ -180,9 +183,10 @@ export function RichTextPreview({ text }: { text: string }) {
                     />
                 );
             } else if (match[6]) {
-                nodes.push(<strong key={key++}>{match[6].slice(2, -2)}</strong>);
+                // Render inside too, so math in bold text still renders.
+                nodes.push(<strong key={key++}>{renderRichText(match[6].slice(2, -2))}</strong>);
             } else if (match[7]) {
-                nodes.push(<em key={key++}>{match[7].slice(1, -1)}</em>);
+                nodes.push(<em key={key++}>{renderRichText(match[7].slice(1, -1))}</em>);
             } else if (match[8]) {
                 nodes.push(<sup key={key++}>{match[8].slice(2, -1)}</sup>);
             } else if (match[9]) {
@@ -199,5 +203,5 @@ export function RichTextPreview({ text }: { text: string }) {
         return nodes;
     };
 
-    return <span>{renderRichText(text)}</span>;
+    return <span style={{ whiteSpace: 'pre-line' }}>{renderRichText(toRichText(text))}</span>;
 }

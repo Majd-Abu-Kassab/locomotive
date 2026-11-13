@@ -64,6 +64,8 @@ export interface QuestionRow {
     source: 'official-imat' | 'locomotive-original' | 'italian-medical';
     year: number | null;
     image_url?: string | null;
+    /** The quiz lesson (topics.id) this question is in; null = course bank only. */
+    lesson_id?: string | null;
 }
 
 export interface TestResultRow {
@@ -158,9 +160,14 @@ export async function getQuestions(supabase: SupabaseClient, filters?: {
     subjects?: string[];
     difficulty?: string;
     source?: string;
+    lessonId?: string;
     limit?: number;
 }, signal?: AbortSignal): Promise<QuestionRow[]> {
     let query = supabase.from('questions').select('*');
+
+    if (filters?.lessonId) {
+        query = query.eq('lesson_id', filters.lessonId);
+    }
 
     if (filters?.subjects && filters.subjects.length > 0) {
         query = query.in('subject', filters.subjects);
@@ -375,6 +382,7 @@ export async function adminSaveQuestion(supabase: SupabaseClient, question: {
     source: string;
     year: number | null;
     image_url?: string | null;
+    lesson_id?: string | null;
 }): Promise<{ error: Error | null }> {
     const dbQ = { ...question, options: JSON.stringify(question.options) };
     const { error } = await supabase.from('questions').upsert(dbQ, { onConflict: 'id' });
@@ -401,12 +409,30 @@ export async function adminBulkImportQuestions(
         explanation: string;
         source: string;
         year: number | null;
+        lesson_id?: string | null;
     }[]
 ): Promise<{ imported: number; error: Error | null }> {
     if (questions.length === 0) return { imported: 0, error: null };
     const rows = questions.map(q => ({ ...q, options: JSON.stringify(q.options) }));
     const { error } = await supabase.from('questions').upsert(rows, { onConflict: 'id' });
     return { imported: error ? 0 : questions.length, error: error ? new Error(error.message) : null };
+}
+
+/** Move questions into a quiz (or back to the course bank with lessonId null). */
+export async function adminMoveQuestions(
+    supabase: SupabaseClient,
+    questionIds: string[],
+    target: { subject: string; lessonId: string | null },
+): Promise<{ error: Error | null }> {
+    // Batches keep the id list (sent in the URL) a safe length.
+    for (let i = 0; i < questionIds.length; i += 100) {
+        const { error } = await supabase
+            .from('questions')
+            .update({ subject: target.subject, lesson_id: target.lessonId })
+            .in('id', questionIds.slice(i, i + 100));
+        if (error) return { error: new Error(error.message) };
+    }
+    return { error: null };
 }
 
 // ===== FILE UPLOADS =====
