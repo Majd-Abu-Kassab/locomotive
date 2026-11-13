@@ -1029,7 +1029,7 @@ export default function AdminPage() {
                                     {moving ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <FolderTree size={14} />} Move
                                 </button>
                                 <span className="text-xs text-secondary" style={{ flexBasis: '100%' }}>
-                                    Use the filter above to narrow down which questions move. A quiz with no questions of its own uses the whole course bank.
+                                    Use the filter above to narrow down which questions move. Each quiz shows only the questions placed in it.
                                 </span>
                             </div>
                         )}

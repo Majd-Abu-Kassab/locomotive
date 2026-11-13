@@ -31,6 +31,9 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
 
     // Quiz — launched via the full-screen exam simulator
     const [quizLoading, setQuizLoading] = useState(false);
+    // The quiz whose Start found no questions (its count may be stale while
+    // the page is open). Keyed by id so it can't carry over to another lesson.
+    const [emptyQuizId, setEmptyQuizId] = useState<string | null>(null);
 
     useEffect(() => {
         // Wait for auth to resolve before fetching. Section unlock status is
@@ -108,14 +111,10 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
         if (!course || !topic) return;
         setQuizLoading(true);
         try {
-            // The quiz's own questions; a quiz with none yet uses the whole
-            // course bank (subject === course name), as quizzes did before
-            // questions could be assigned to one.
-            let questions = await getQuestions(supabase, { lessonId: topic.id });
+            // Only the questions placed in this quiz (admin: Course → Module › Quiz).
+            const questions = await getQuestions(supabase, { lessonId: topic.id });
             if (questions.length === 0) {
-                questions = await getQuestions(supabase, { subjects: [course.name] });
-            }
-            if (questions.length === 0) {
+                setEmptyQuizId(topic.id);
                 setQuizLoading(false);
                 return;
             }
@@ -385,14 +384,22 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                             <h3 style={{ fontSize: 'var(--fs-xl)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>
                                 Practice Quiz — {topic.name}
                             </h3>
-                            <p className="text-secondary" style={{ marginBottom: 'var(--space-6)' }}>
-                                Take this quiz in the full exam interface — timed, one question at a time, with a review at the end.
-                            </p>
-                            <button className="btn btn-primary btn-lg" onClick={startExamQuiz} disabled={quizLoading}>
-                                {quizLoading
-                                    ? <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Starting…</>
-                                    : <>Start Quiz <ArrowRight size={18} /></>}
-                            </button>
+                            {emptyQuizId === topic.id || topic.question_count === 0 ? (
+                                <p className="text-secondary">
+                                    This quiz doesn’t have any questions yet. Check back soon.
+                                </p>
+                            ) : (
+                                <>
+                                    <p className="text-secondary" style={{ marginBottom: 'var(--space-6)' }}>
+                                        Take this quiz in the full exam interface — timed, one question at a time, with a review at the end.
+                                    </p>
+                                    <button className="btn btn-primary btn-lg" onClick={startExamQuiz} disabled={quizLoading}>
+                                        {quizLoading
+                                            ? <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Starting…</>
+                                            : <>Start Quiz <ArrowRight size={18} /></>}
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
                 )}

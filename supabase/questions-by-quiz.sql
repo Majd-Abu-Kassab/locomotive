@@ -10,8 +10,9 @@
 --   lesson_id set   → it's in that quiz (and still in the course bank for
 --                     Create Test practice)
 --   lesson_id null  → course bank only
--- A quiz with no questions of its own keeps using the whole course bank, so
--- existing quizzes don't go empty before questions are assigned.
+-- A quiz shows only its own questions; a quiz with none is empty. (It used to
+-- fall back to the whole course bank, which made every empty quiz repeat
+-- another quiz's questions.) Re-run this file to apply that change.
 
 -- ===== 1. The link =====
 ALTER TABLE public.questions
@@ -19,21 +20,14 @@ ALTER TABLE public.questions
 CREATE INDEX IF NOT EXISTS questions_lesson_id_idx ON public.questions (lesson_id);
 
 -- ===== 2. Quiz question counts are calculated, not typed =====
--- topics.question_count is what students see ("12 questions"). It now equals
--- the quiz's own questions, or the course bank size for a quiz with none.
+-- topics.question_count is what students see ("12 questions"): the number of
+-- questions placed in that quiz.
 CREATE OR REPLACE FUNCTION public.recount_quiz_questions()
 RETURNS void AS $$
 BEGIN
     WITH counts AS (
         SELECT t.id,
-               COALESCE(
-                   NULLIF((SELECT count(*) FROM public.questions q WHERE q.lesson_id = t.id), 0),
-                   (SELECT count(*)
-                    FROM public.questions q
-                    JOIN public.courses c ON c.name = q.subject
-                    JOIN public.modules m ON m.course_id = c.id
-                    WHERE m.id = t.module_id)
-               ) AS n
+               (SELECT count(*) FROM public.questions q WHERE q.lesson_id = t.id)::int AS n
         FROM public.topics t
         WHERE t.lesson_type = 'quiz'
     )
