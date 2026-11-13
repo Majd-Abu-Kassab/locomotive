@@ -3,18 +3,46 @@
 import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import Link from 'next/link';
-import { Clock, FileText, ArrowRight, Calendar, Loader2 } from 'lucide-react';
+import { Clock, FileText, ArrowRight, Calendar, Loader2, Pencil, Eye, Check, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
-import { getTestResults, TestResultRow } from '@/lib/api';
+import { useToast } from '@/components/Toast';
+import { getTestResults, renameTestResult, TestResultRow } from '@/lib/api';
+
+// Reopens a past test in the exam page's results and review screens.
+const reviewHref = (id: string) => `/test/review?result=${encodeURIComponent(id)}`;
 
 export default function PreviousTestsPage() {
     const { user } = useAuth();
     const supabase = useSupabase();
     const { getSignal } = useAbortController();
+    const { addToast } = useToast();
     const [tests, setTests] = useState<TestResultRow[]>([]);
     const [loading, setLoading] = useState(true);
+    // Inline rename: which test is being renamed, and the name being typed.
+    const [renamingId, setRenamingId] = useState<string | null>(null);
+    const [draftName, setDraftName] = useState('');
+    const [savingName, setSavingName] = useState(false);
+
+    const startRename = (test: TestResultRow) => {
+        setRenamingId(test.id);
+        setDraftName(test.name);
+    };
+
+    const saveRename = async () => {
+        const name = draftName.trim();
+        if (!renamingId || !name) return;
+        setSavingName(true);
+        const { error } = await renameTestResult(supabase, renamingId, name);
+        setSavingName(false);
+        if (error) {
+            addToast('Couldn’t rename the test. Please try again.', 'error');
+            return;
+        }
+        setTests(prev => prev.map(t => t.id === renamingId ? { ...t, name } : t));
+        setRenamingId(null);
+    };
 
     useEffect(() => {
         // Wait for auth to actually resolve a user before deciding we're done
@@ -58,7 +86,7 @@ export default function PreviousTestsPage() {
             <div className="page-wrapper">
                 <div className="page-header">
                     <h1>Previous Tests</h1>
-                    <p>Review your past test attempts and track improvement</p>
+                    <p>Review your past tests question by question, rename them, and track improvement</p>
                 </div>
 
                 {tests.length === 0 ? (
@@ -82,16 +110,46 @@ export default function PreviousTestsPage() {
                                         <th>Correct</th>
                                         <th>Incorrect</th>
                                         <th>Skipped</th>
+                                        <th></th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {tests.map(test => (
                                         <tr key={test.id}>
                                             <td style={{ fontWeight: 500 }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                                                    <FileText size={14} style={{ color: 'var(--text-tertiary)' }} />
-                                                    {test.name}
-                                                </div>
+                                                {renamingId === test.id ? (
+                                                    <form
+                                                        style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}
+                                                        onSubmit={e => { e.preventDefault(); saveRename(); }}
+                                                    >
+                                                        <input
+                                                            className="input"
+                                                            value={draftName}
+                                                            onChange={e => setDraftName(e.target.value)}
+                                                            onKeyDown={e => { if (e.key === 'Escape') setRenamingId(null); }}
+                                                            maxLength={120}
+                                                            autoFocus
+                                                            aria-label="Test name"
+                                                            style={{ minWidth: 200, padding: '4px 8px' }}
+                                                        />
+                                                        <button type="submit" className="btn btn-ghost btn-sm" disabled={savingName || !draftName.trim()} aria-label="Save name" title="Save">
+                                                            {savingName ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={14} />}
+                                                        </button>
+                                                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRenamingId(null)} aria-label="Cancel rename" title="Cancel">
+                                                            <X size={14} />
+                                                        </button>
+                                                    </form>
+                                                ) : (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                                        <FileText size={14} style={{ color: 'var(--text-tertiary)' }} />
+                                                        <Link href={reviewHref(test.id)} style={{ color: 'inherit', textDecoration: 'none' }} title="Review this test">
+                                                            {test.name}
+                                                        </Link>
+                                                        <button className="btn btn-ghost btn-sm" onClick={() => startRename(test)} aria-label={`Rename ${test.name}`} title="Rename" style={{ padding: 4 }}>
+                                                            <Pencil size={12} />
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </td>
                                             <td>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-secondary)' }}>
@@ -114,6 +172,11 @@ export default function PreviousTestsPage() {
                                             <td style={{ color: 'var(--color-success)' }}>{test.correct}</td>
                                             <td style={{ color: 'var(--color-danger)' }}>{test.incorrect}</td>
                                             <td className="text-secondary">{test.unanswered}</td>
+                                            <td>
+                                                <Link href={reviewHref(test.id)} className="btn btn-secondary btn-sm" style={{ whiteSpace: 'nowrap' }}>
+                                                    <Eye size={14} /> Review
+                                                </Link>
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>

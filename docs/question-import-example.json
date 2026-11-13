@@ -1,0 +1,47 @@
+[
+  {
+    "quiz_title": "Number System",
+    "questions": [
+      {
+        "title": "Real numbers",
+        "content": "Which of the following is **not** a real number?",
+        "options": [
+          "$\\frac{1}{\\sqrt{2}}$",
+          "$\\sqrt{3}$",
+          "$\\sqrt{-9}$",
+          "$1.46\\overline{75}$",
+          "$2.718281\\ldots$"
+        ],
+        "correct": 2,
+        "explanation": "The square root of a negative number is not real; it is imaginary.\n$\\sqrt{-9} = 3i$, so option C is not a real number.\nAll the other options are rational or irrational numbers, which are real."
+      },
+      {
+        "title": "Rationalising the denominator",
+        "content": "Which of the following is the rationalised form of the expression below?\n\n$$\\frac{5}{2 + \\sqrt{3}}$$",
+        "options": [
+          "$\\frac{10 + 5\\sqrt{3}}{7}$",
+          "$10 - 5\\sqrt{3}$",
+          "$\\frac{10 - 5\\sqrt{3}}{7}$",
+          "$\\frac{2 + \\sqrt{3}}{7}$",
+          "$\\frac{5(2 - \\sqrt{3})}{2}$"
+        ],
+        "correct": 1,
+        "explanation": "Multiply the top and bottom by the conjugate $2 - \\sqrt{3}$:\n$$\\frac{5}{2 + \\sqrt{3}} \\times \\frac{2 - \\sqrt{3}}{2 - \\sqrt{3}} = \\frac{5(2 - \\sqrt{3})}{4 - 3} = 10 - 5\\sqrt{3}$$\n**Common mistake:** adding instead of subtracting in the denominator gives $4 + 3 = 7$."
+      },
+      {
+        "title": "Moles of water",
+        "content": "How many moles of water are produced when 4 mol of $H_2$ react completely with excess $O_2$?\n\n$$2H_2 + O_2 \\rightarrow 2H_2O$$",
+        "options": ["2 mol", "4 mol", "6 mol", "8 mol", "1 mol"],
+        "correct": 1,
+        "explanation": "The ratio of $H_2$ to $H_2O$ is 2 : 2, so 4 mol of $H_2$ gives 4 mol of $H_2O$."
+      },
+      {
+        "title": "Average speed",
+        "content": "A car travels 120 km in 1.5 hours. What is its average speed?",
+        "options": ["80 km/h", "60 km/h", "90 km/h", "120 km/h", "180 km/h"],
+        "correct": 0,
+        "explanation": "$v = \\frac{\\text{distance}}{\\text{time}} = \\frac{120}{1.5} = 80$ km/h"
+      }
+    ]
+  }
+]

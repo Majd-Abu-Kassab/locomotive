@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import {
     Clock, Flag, FlagOff, AlertTriangle, StickyNote, ChevronLeft, ChevronRight, Send, X, Loader2,
     ArrowLeft, Check, Eye, EyeOff
@@ -9,7 +9,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
-import { saveTestResult, saveTestAnswers, QuestionRow, getQuestions } from '@/lib/api';
+import { saveTestResult, saveTestAnswers, getTestReview, QuestionRow, getQuestions } from '@/lib/api';
 import { RichTextPreview } from '@/components/RichTextEditor';
 import { useToast } from '@/components/Toast';
 import './test-sim.css';
@@ -42,6 +42,9 @@ export default function TestSimulationPage() {
     const [highlightMode, setHighlightMode] = useState(false);
     const [saving, setSaving] = useState(false);
     const [startTime] = useState(Date.now());
+    // Set when reviewing a past test from Previous Tests (its date taken).
+    const [pastDate, setPastDate] = useState<string | null>(null);
+    const { testId } = useParams<{ testId: string }>();
 
     // Load questions from sessionStorage or fallback to DB.
     // The loader CONSUMES the sessionStorage handoff (it deletes the keys after
@@ -54,6 +57,23 @@ export default function TestSimulationPage() {
         if (didLoadRef.current) return;
         didLoadRef.current = true;
         async function load() {
+            // /test/review?result=<id>: reopen a past test, already submitted,
+            // straight into its results and review (from Previous Tests).
+            const pastId = testId === 'review' ? new URLSearchParams(window.location.search).get('result') : null;
+            if (pastId) {
+                const past = await getTestReview(supabase, pastId);
+                if (past) {
+                    setQuestions(past.questions);
+                    setAnswers(Object.fromEntries(past.answers.map((a, i) => [i, a])));
+                    setTestName(past.result.name);
+                    setTestMode(past.result.mode);
+                    setPastDate(past.result.date);
+                    setSubmitted(true);
+                }
+                setLoading(false);
+                return;
+            }
+
             const stored = sessionStorage.getItem('test_questions');
             const storedMode = sessionStorage.getItem('test_mode') as 'timed' | 'untimed' | null;
             const storedName = sessionStorage.getItem('test_name');
@@ -87,7 +107,7 @@ export default function TestSimulationPage() {
             setLoading(false);
         }
         load();
-    }, [supabase, getSignal]);
+    }, [supabase, getSignal, testId]);
 
     // No copying questions out or pasting answers in, for as long as the test
     // page is open (exam, results and review). Covers keyboard shortcuts,
@@ -237,6 +257,7 @@ export default function TestSimulationPage() {
                         question_id: q.id,
                         selected_answer: answers[i] ?? null,
                         is_correct: answers[i] !== undefined && answers[i] !== null ? answers[i] === q.correct_answer : null,
+                        position: i,
                     }));
                     await saveTestAnswers(supabase, testAnswers);
                 }
@@ -330,9 +351,19 @@ export default function TestSimulationPage() {
     if (questions.length === 0) {
         return (
             <div className="test-sim" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', gap: 'var(--space-4)' }}>
-                <h2>No questions available</h2>
-                <p className="text-secondary">Try adjusting your filters or add more questions to the database.</p>
-                <button className="btn btn-primary" onClick={() => router.push('/create-test')}>Back to Create Test</button>
+                {testId === 'review' ? (
+                    <>
+                        <h2>Couldn’t open this test</h2>
+                        <p className="text-secondary">It may have been deleted, or its questions were removed from the bank.</p>
+                        <button className="btn btn-primary" onClick={() => router.push('/previous-tests')}>Back to Previous Tests</button>
+                    </>
+                ) : (
+                    <>
+                        <h2>No questions available</h2>
+                        <p className="text-secondary">Try adjusting your filters or add more questions to the database.</p>
+                        <button className="btn btn-primary" onClick={() => router.push('/create-test')}>Back to Create Test</button>
+                    </>
+                )}
             </div>
         );
     }
@@ -345,10 +376,12 @@ export default function TestSimulationPage() {
             <div className="test-results-page">
                 <div className="test-results-card animate-scale-in">
                     <h1 style={{ fontSize: 'var(--fs-3xl)', fontWeight: 700, marginBottom: 'var(--space-2)', textAlign: 'center' }}>
-                        Test Complete! 🎉
+                        {pastDate ? testName : 'Test Complete! 🎉'}
                     </h1>
                     <p style={{ textAlign: 'center', color: 'var(--text-secondary)', marginBottom: 'var(--space-8)' }}>
-                        {saving ? 'Saving your results...' : 'Here are your results'}
+                        {pastDate
+                            ? `Taken ${new Date(pastDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                            : saving ? 'Saving your results...' : 'Here are your results'}
                     </p>
 
                     <div className="results-score-circle">
@@ -418,9 +451,15 @@ export default function TestSimulationPage() {
                     </button>
 
                     <div style={{ display: 'flex', gap: 'var(--space-4)', marginTop: 'var(--space-8)' }}>
-                        <button className="btn btn-secondary btn-lg" style={{ flex: 1 }} onClick={() => router.push('/dashboard')}>
-                            Back to Dashboard
-                        </button>
+                        {pastDate ? (
+                            <button className="btn btn-secondary btn-lg" style={{ flex: 1 }} onClick={() => router.push('/previous-tests')}>
+                                Back to Previous Tests
+                            </button>
+                        ) : (
+                            <button className="btn btn-secondary btn-lg" style={{ flex: 1 }} onClick={() => router.push('/dashboard')}>
+                                Back to Dashboard
+                            </button>
+                        )}
                         <button className="btn btn-secondary btn-lg" style={{ flex: 1 }} onClick={() => router.push('/create-test')}>
                             Take Another Test
                         </button>

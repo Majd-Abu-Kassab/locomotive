@@ -30,6 +30,9 @@ export default function CreateTestPage() {
     // empty test page. `upgrade` distinguishes "all matches are premium" from
     // "nothing matched these filters".
     const [notice, setNotice] = useState<{ text: string; upgrade: boolean } | null>(null);
+    // Optional; blank uses the generated name below. Renamable later in Previous Tests.
+    const [testName, setTestName] = useState('');
+    const defaultName = `Custom Test - ${selectedSubjects.length > 0 ? selectedSubjects.join(', ') : 'All Subjects'}`;
 
     useEffect(() => {
         const signal = getSignal();
@@ -88,7 +91,7 @@ export default function CreateTestPage() {
             // Store questions in sessionStorage for the test page
             sessionStorage.setItem('test_questions', JSON.stringify(finalQuestions));
             sessionStorage.setItem('test_mode', mode);
-            sessionStorage.setItem('test_name', `Custom Test - ${selectedSubjects.length > 0 ? selectedSubjects.join(', ') : 'All Subjects'}`);
+            sessionStorage.setItem('test_name', testName.trim() || defaultName);
             router.push('/test/custom');
         } catch (err) {
             console.error('Error starting test:', err);
@@ -113,6 +116,22 @@ export default function CreateTestPage() {
                 <div className="page-header">
                     <h1>Create Test</h1>
                     <p>Build a custom exam tailored to your study needs</p>
+                </div>
+
+                {/* Name */}
+                <div className="ct-section">
+                    <h2 className="ct-section-title">Test Name</h2>
+                    <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
+                        Optional. Helps you find this test later in Previous Tests, where you can also rename it.
+                    </p>
+                    <input
+                        className="input"
+                        value={testName}
+                        onChange={e => setTestName(e.target.value)}
+                        placeholder={defaultName}
+                        maxLength={120}
+                        style={{ maxWidth: 480 }}
+                    />
                 </div>
 
                 {/* Mode Selection */}

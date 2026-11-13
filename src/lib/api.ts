@@ -244,9 +244,56 @@ export async function saveTestAnswers(supabase: SupabaseClient, answers: {
     question_id: string;
     selected_answer: number | null;
     is_correct: boolean | null;
+    /** Order the question appeared in, so the test can be reviewed in that order. */
+    position: number;
 }[]): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('test_answers').insert(answers);
     return { error: error ? new Error(error.message) : null };
+}
+
+export async function renameTestResult(supabase: SupabaseClient, resultId: string, name: string): Promise<{ error: Error | null }> {
+    const { error } = await supabase.from('test_results').update({ name: name.trim() }).eq('id', resultId);
+    return { error: error ? new Error(error.message) : null };
+}
+
+/**
+ * A past test rebuilt for review: its questions in the order they were taken
+ * and the answer given to each (null = skipped). Questions deleted from the
+ * bank since are left out.
+ */
+export async function getTestReview(supabase: SupabaseClient, resultId: string): Promise<{
+    result: TestResultRow;
+    questions: QuestionRow[];
+    answers: (number | null)[];
+} | null> {
+    const [{ data: result }, { data: rows }] = await Promise.all([
+        supabase.from('test_results').select('*').eq('id', resultId).maybeSingle(),
+        supabase.from('test_answers')
+            .select('question_id, selected_answer, position')
+            .eq('test_result_id', resultId)
+            .order('position', { nullsFirst: false })
+            .order('id'),
+    ]);
+    if (!result || !rows) return null;
+
+    const ids = rows.map(r => r.question_id);
+    const { data: qs } = ids.length
+        ? await supabase.from('questions').select('*').in('id', ids)
+        : { data: [] };
+    const byId = new Map((qs || []).map(q => [q.id, {
+        ...q,
+        options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
+    } as QuestionRow]));
+
+    const questions: QuestionRow[] = [];
+    const answers: (number | null)[] = [];
+    for (const r of rows) {
+        const q = byId.get(r.question_id);
+        if (!q) continue;
+        questions.push(q);
+        answers.push(r.selected_answer);
+    }
+    return { result, questions, answers };
 }
 
 // ===== SCHEDULE =====
