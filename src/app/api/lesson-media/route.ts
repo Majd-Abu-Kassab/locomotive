@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createSupabaseServer } from '@/lib/supabase-server';
 
-// GET /api/lesson-media?lessonId=…
+// GET /api/lesson-media?lessonId=…[&download=1]
 // Lesson videos, PDFs and slides live in the private 'course-content' bucket.
 // Students never get a permanent address: after checking they're signed in
 // and allowed into the lesson, this returns a link that expires, so it can't
 // be shared or reused, and paid lessons can't be opened without access.
+// download=1 asks for a save-to-disk link, given only for lessons an admin
+// allowed to be downloaded (and slide decks, which can't be viewed otherwise).
 export const dynamic = 'force-dynamic';
 
 const BUCKET = 'course-content';
@@ -27,6 +29,7 @@ function storagePath(contentUrl: string): string | null {
 
 export async function GET(req: NextRequest) {
     const lessonId = req.nextUrl.searchParams.get('lessonId');
+    const wantsDownload = req.nextUrl.searchParams.get('download') === '1';
     if (!lessonId) return NextResponse.json({ error: 'lessonId is required' }, { status: 400, headers: noStore });
 
     const supabase = await createSupabaseServer();
@@ -39,10 +42,15 @@ export async function GET(req: NextRequest) {
     try {
         const { data: lesson } = await admin
             .from('topics')
-            .select('id, module_id, content_url')
+            .select('id, module_id, name, content_url, content_type, allow_download')
             .eq('id', lessonId)
             .maybeSingle();
         if (!lesson?.content_url) return NextResponse.json({ error: 'No content' }, { status: 404, headers: noStore });
+
+        const canDownload = !!lesson.allow_download || lesson.content_type === 'presentation';
+        if (wantsDownload && !canDownload) {
+            return NextResponse.json({ error: 'Downloading this file is turned off' }, { status: 403, headers: noStore });
+        }
 
         // Same rule as the lesson page: a module that's in no paid section is
         // free; otherwise the student needs access to a section containing it.
@@ -69,7 +77,12 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ url: lesson.content_url }, { headers: noStore });
         }
 
-        const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(path, LINK_SECONDS);
+        // A download link saves the file under the lesson's name instead of opening it.
+        const ext = path.split('.').pop();
+        const fileName = `${lesson.name.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'lesson'}.${ext}`;
+        const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(
+            path, LINK_SECONDS, wantsDownload ? { download: fileName } : undefined,
+        );
         if (error || !data) {
             console.error('lesson-media sign error:', error);
             return NextResponse.json({ error: 'Could not load this file' }, { status: 500, headers: noStore });

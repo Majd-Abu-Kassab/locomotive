@@ -6,14 +6,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
     ArrowLeft, ArrowRight, Play, FileText, CheckCircle2, Circle,
-    Loader2, Video, HelpCircle, ChevronRight, Download, Lock
+    Loader2, Video, HelpCircle, ChevronRight, Lock
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
 import { getCourse, getCourseSections, getQuestions, markTopicComplete, markTopicIncomplete, CourseWithModules, TopicWithProgress, CourseSection } from '@/lib/api';
 import { decodeParam } from '@/lib/params';
-import { LessonVideo, LessonFile } from '@/components/LessonMedia';
+import { LessonVideo, LessonFile, LessonDownloadButton } from '@/components/LessonMedia';
+import PdfViewer from '@/components/PdfViewer';
 
 export default function LessonPage({ params }: { params: Promise<{ courseId: string; lessonId: string }> }) {
     const resolved = use(params);
@@ -306,44 +307,38 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                         overflow: 'hidden',
                     }}>
                         {topic.content_url ? (
-                            <LessonFile key={topic.id} lessonId={topic.id} label="file" height={600}>
-                                {fileUrl => (
-                                    <>
-                                        <div style={{
-                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                            padding: 'var(--space-3) var(--space-4)',
-                                            background: 'rgba(245,158,11,0.08)',
-                                            borderBottom: '1px solid var(--border-primary)',
-                                        }}>
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
-                                                <FileText size={16} style={{ color: 'var(--color-warning)' }} />
-                                                {topic.content_type === 'presentation' ? 'Presentation' : 'PDF Study Material'}
-                                            </span>
-                                            <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm" download>
-                                                <Download size={14} /> Download
-                                            </a>
-                                        </div>
-                                        {topic.content_type === 'pdf' ? (
-                                            <iframe
-                                                src={fileUrl}
-                                                style={{ width: '100%', height: '600px', border: 'none' }}
-                                                title={`${topic.name} - PDF`}
-                                            />
-                                        ) : (
-                                            <div style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
-                                                <FileText size={48} style={{ color: 'var(--color-warning)', marginBottom: 'var(--space-3)' }} />
-                                                <p style={{ fontWeight: 600, marginBottom: 'var(--space-2)' }}>Presentation Available</p>
-                                                <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
-                                                    Download to view in PowerPoint or Google Slides
-                                                </p>
-                                                <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
-                                                    <Download size={16} /> Download Presentation
-                                                </a>
-                                            </div>
-                                        )}
-                                    </>
+                            <>
+                                <div style={{
+                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                    padding: 'var(--space-3) var(--space-4)',
+                                    background: 'rgba(245,158,11,0.08)',
+                                    borderBottom: '1px solid var(--border-primary)',
+                                }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+                                        <FileText size={16} style={{ color: 'var(--color-warning)' }} />
+                                        {topic.content_type === 'presentation' ? 'Presentation' : 'PDF Study Material'}
+                                    </span>
+                                    {/* View-only unless an admin allowed downloading this lesson. */}
+                                    {topic.content_type === 'pdf' && topic.allow_download && (
+                                        <LessonDownloadButton key={topic.id} lessonId={topic.id} />
+                                    )}
+                                </div>
+                                {topic.content_type === 'pdf' ? (
+                                    <LessonFile key={topic.id} lessonId={topic.id} label="PDF" height={600}>
+                                        {fileUrl => <PdfViewer url={fileUrl} title={`${topic.name} - PDF`} />}
+                                    </LessonFile>
+                                ) : (
+                                    // Slide decks can only be opened by downloading them.
+                                    <div style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
+                                        <FileText size={48} style={{ color: 'var(--color-warning)', marginBottom: 'var(--space-3)' }} />
+                                        <p style={{ fontWeight: 600, marginBottom: 'var(--space-2)' }}>Presentation Available</p>
+                                        <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
+                                            Download to view in PowerPoint or Google Slides
+                                        </p>
+                                        <LessonDownloadButton key={topic.id} lessonId={topic.id} label="Download Presentation" className="btn btn-primary" />
+                                    </div>
                                 )}
-                            </LessonFile>
+                            </>
                         ) : (
                             <div style={{
                                 minHeight: '400px',

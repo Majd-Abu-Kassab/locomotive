@@ -50,6 +50,8 @@ export interface TopicWithProgress {
     completed: boolean;
     content_url?: string | null;
     content_type?: string | null;
+    /** Students may download this lesson's file (off by default; slide decks always). */
+    allow_download?: boolean;
 }
 
 export interface QuestionRow {
@@ -407,6 +409,7 @@ export async function adminSaveTopic(supabase: SupabaseClient, topic: {
     question_count: number;
     lesson_type: 'video' | 'pdf' | 'quiz';
     sort_order: number;
+    allow_download: boolean;
 }): Promise<{ error: Error | null }> {
     const { error } = await supabase.from('topics').upsert(topic, { onConflict: 'id' });
     return { error: error ? new Error(error.message) : null };

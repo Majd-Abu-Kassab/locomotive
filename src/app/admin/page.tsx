@@ -445,6 +445,7 @@ export default function AdminPage() {
             lesson_type: editingTopic.lesson_type || 'video',
             question_count: editingTopic.question_count || 0,
             sort_order: editingTopic.sort_order || 0,
+            allow_download: !!editingTopic.allow_download,
         });
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Topic saved', 'success');
@@ -829,6 +830,11 @@ export default function AdminPage() {
                                                                         <span style={{ fontWeight: 500, fontSize: 'var(--fs-sm)' }}>{topic.name}</span>
                                                                         {topic.lesson_type === 'quiz' && <span className="badge badge-success" style={{ fontSize: 9 }}>{topic.question_count} Qs</span>}
                                                                         {topic.content_url && <span className="badge badge-accent" style={{ fontSize: 9 }}>Content Uploaded</span>}
+                                                                        {topic.lesson_type === 'pdf' && topic.content_url && topic.content_type === 'pdf' && (
+                                                                            <span className={`badge ${topic.allow_download ? 'badge-success' : ''}`} style={{ fontSize: 9 }}>
+                                                                                {topic.allow_download ? 'Download allowed' : 'View only'}
+                                                                            </span>
+                                                                        )}
                                                                     </div>
                                                                     <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
                                                                         <button className="btn btn-ghost btn-sm" style={{ padding: '4px' }} onClick={() => setEditingTopic(topic)}><Edit3 size={14} /></button>
@@ -2225,6 +2231,17 @@ export default function AdminPage() {
                                     <input className="input" type="number" value={editingTopic.question_count || 0} disabled title="Calculated automatically from the questions in this quiz" />
                                 </div>
                             </div>
+                            {editingTopic.lesson_type === 'pdf' && (
+                                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)', cursor: 'pointer', padding: 'var(--space-3)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', background: editingTopic.allow_download ? 'rgba(37,99,235,0.1)' : 'transparent' }}>
+                                    <input type="checkbox" style={{ marginTop: 3 }} checked={!!editingTopic.allow_download} onChange={e => setEditingTopic({ ...editingTopic, allow_download: e.target.checked })} />
+                                    <span>
+                                        <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, display: 'block' }}>Students can download this PDF</span>
+                                        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+                                            Off: students can read it on the site but get no Download button. Slide decks (.pptx) are always downloadable, since that’s the only way to open them.
+                                        </span>
+                                    </span>
+                                </label>
+                            )}
                         </div>
                         <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-5)' }} onClick={handleSaveTopic} disabled={savingTopic || !editingTopic.name}>
                             {savingTopic ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : <><Save size={16} /> Save Topic</>}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, ReactNode } from 'react';
-import { Loader2, AlertTriangle } from 'lucide-react';
+import { Loader2, AlertTriangle, Download } from 'lucide-react';
 
 // Lesson files are private; /api/lesson-media hands out a link that expires
 // (see that route). These components fetch it and keep it working.
@@ -87,6 +87,41 @@ export function LessonVideo({ lessonId }: { lessonId: string }) {
         >
             Your browser does not support the video tag.
         </video>
+    );
+}
+
+/**
+ * Download button for a lesson whose file students may save. It asks for a
+ * save-to-disk link when clicked (the server refuses lessons where downloading
+ * is off), so the link is always fresh.
+ */
+export function LessonDownloadButton({ lessonId, label = 'Download', className = 'btn btn-secondary btn-sm' }: {
+    lessonId: string;
+    label?: string;
+    className?: string;
+}) {
+    const [busy, setBusy] = useState(false);
+    const [failed, setFailed] = useState(false);
+    const download = async () => {
+        setBusy(true);
+        setFailed(false);
+        try {
+            const res = await fetch(`/api/lesson-media?lessonId=${encodeURIComponent(lessonId)}&download=1`, { cache: 'no-store' });
+            const body = res.ok ? await res.json() : null;
+            // The link is served as an attachment, so this downloads without leaving the page.
+            if (typeof body?.url === 'string') window.location.href = body.url;
+            else setFailed(true);
+        } catch {
+            setFailed(true);
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <button className={className} onClick={download} disabled={busy} title={failed ? 'Download failed — try again' : undefined}>
+            {busy ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : failed ? <AlertTriangle size={14} /> : <Download size={14} />}
+            {failed ? 'Try again' : label}
+        </button>
     );
 }
 
