@@ -91,6 +91,7 @@ export default function CreateTestPage() {
             // Store questions in sessionStorage for the test page
             sessionStorage.setItem('test_questions', JSON.stringify(finalQuestions));
             sessionStorage.setItem('test_mode', mode);
+            sessionStorage.removeItem('test_lesson_id'); // a custom test isn't a lesson quiz
             sessionStorage.setItem('test_name', testName.trim() || defaultName);
             router.push('/test/custom');
         } catch (err) {

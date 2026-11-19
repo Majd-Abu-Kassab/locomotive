@@ -46,7 +46,7 @@ function Placeholder({ failed, label, height }: { failed: boolean; label: string
  * Watch-only lesson video (client request): no download button, no download
  * or cast option in the player, no right-click "Save video as".
  */
-export function LessonVideo({ lessonId }: { lessonId: string }) {
+export function LessonVideo({ lessonId, onEnded }: { lessonId: string; onEnded?: () => void }) {
     const { url, failed, setUrl } = useLessonUrl(lessonId);
     const videoRef = useRef<HTMLVideoElement>(null);
     const resumeAt = useRef<number | null>(null);
@@ -82,6 +82,7 @@ export function LessonVideo({ lessonId }: { lessonId: string }) {
             onContextMenu={e => e.preventDefault()}
             onError={onError}
             onLoadedMetadata={onLoadedMetadata}
+            onEnded={onEnded}
             preload="metadata"
             style={{ width: '100%', maxHeight: '70vh', background: '#000', display: 'block' }}
         >

@@ -125,11 +125,21 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
             // not a per-question timer. Clear any stale per-question flag.
             sessionStorage.removeItem('test_timer_mode');
             sessionStorage.setItem('test_name', `${topic.name} — Practice Quiz`);
+            // So submitting the quiz marks this lesson complete.
+            sessionStorage.setItem('test_lesson_id', topic.id);
             router.push('/test/quiz');
         } catch (err) {
             console.error('Error starting quiz:', err);
             setQuizLoading(false);
         }
+    };
+
+    // Watching a lesson video to the end completes the lesson (quizzes do it
+    // on submit, in the test page). Never un-completes.
+    const completeLesson = async () => {
+        if (!user || !topic || topicCompleted) return;
+        const { error } = await markTopicComplete(supabase, user.id, topic.id);
+        if (!error) setTopicCompleted(true);
     };
 
     const handleToggleComplete = async () => {
@@ -271,7 +281,7 @@ export default function LessonPage({ params }: { params: Promise<{ courseId: str
                                         Video Lecture
                                     </span>
                                 </div>
-                                <LessonVideo key={topic.id} lessonId={topic.id} />
+                                <LessonVideo key={topic.id} lessonId={topic.id} onEnded={completeLesson} />
                             </>
                         ) : (
                             <div style={{

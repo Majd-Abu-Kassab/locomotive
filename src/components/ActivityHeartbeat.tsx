@@ -2,9 +2,12 @@
 
 import { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { localDay } from '@/lib/studyStats';
 
 const PING_EVERY_MS = 5 * 60_000; // at most one ping per 5 minutes of interaction
 const EVENTS = ['pointerdown', 'keydown', 'scroll', 'wheel', 'touchstart'] as const;
+// Pages where active time counts as study time on the dashboard.
+const STUDY_PAGES = /^\/(courses|test|memotive|study-planner|create-test|starter-pack|previous-tests)(\/|$)/;
 
 /**
  * Keeps the middleware's inactivity timeout honest.
@@ -31,7 +34,9 @@ export default function ActivityHeartbeat() {
             inFlight = true;
             lastPing = Date.now();
             try {
-                const res = await fetch('/api/activity', { cache: 'no-store', redirect: 'manual' });
+                // On a study page, the server also adds these minutes to today's study time.
+                const study = STUDY_PAGES.test(window.location.pathname) ? '1' : '0';
+                const res = await fetch(`/api/activity?study=${study}&day=${localDay(new Date())}`, { cache: 'no-store', redirect: 'manual' });
                 // A redirect means middleware already ended the session (it had
                 // expired, or the user is signed out) — land on login cleanly
                 // instead of leaving them on a page whose requests now fail.

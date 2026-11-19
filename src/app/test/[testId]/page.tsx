@@ -9,7 +9,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
-import { saveTestResult, saveTestAnswers, getTestReview, QuestionRow, getQuestions } from '@/lib/api';
+import { saveTestResult, saveTestAnswers, getTestReview, markTopicComplete, QuestionRow, getQuestions } from '@/lib/api';
 import { RichTextPreview } from '@/components/RichTextEditor';
 import { useToast } from '@/components/Toast';
 import './test-sim.css';
@@ -53,6 +53,7 @@ export default function TestSimulationPage() {
     // keys already cleared and silently drops into the random fallback,
     // replacing the intended quiz questions. This ref guards against that.
     const didLoadRef = useRef(false);
+    const lessonIdRef = useRef<string | null>(null);
     useEffect(() => {
         if (didLoadRef.current) return;
         didLoadRef.current = true;
@@ -78,6 +79,9 @@ export default function TestSimulationPage() {
             const storedMode = sessionStorage.getItem('test_mode') as 'timed' | 'untimed' | null;
             const storedName = sessionStorage.getItem('test_name');
             const perQ = sessionStorage.getItem('test_timer_mode') === 'per-question';
+            // Set when started from a lesson's quiz: submitting completes that lesson.
+            lessonIdRef.current = sessionStorage.getItem('test_lesson_id');
+            sessionStorage.removeItem('test_lesson_id');
 
             if (stored) {
                 const parsed = JSON.parse(stored);
@@ -260,6 +264,9 @@ export default function TestSimulationPage() {
                         position: i,
                     }));
                     await saveTestAnswers(supabase, testAnswers);
+                }
+                if (lessonIdRef.current) {
+                    await markTopicComplete(supabase, user.id, lessonIdRef.current);
                 }
             } catch (err) {
                 console.error('Error saving test results:', err);

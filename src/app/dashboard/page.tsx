@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { isAbortError } from '@/hooks/useAbortController';
 import { getCourses, getTestResults, CourseWithModules, TestResultRow } from '@/lib/api';
+import { getStudyActivity, estimatedScore, studyStreak, studyHours, localDay, IMAT_MAX, StudyDay } from '@/lib/studyStats';
 import './dashboard.css';
 
 export default function DashboardPage() {
@@ -21,6 +22,8 @@ export default function DashboardPage() {
 
     const [courses, setCourses] = useState<CourseWithModules[]>([]);
     const [lastTest, setLastTest] = useState<TestResultRow | null>(null);
+    const [tests, setTests] = useState<TestResultRow[]>([]);
+    const [studyDays, setStudyDays] = useState<StudyDay[]>([]);
     const [dataLoading, setDataLoading] = useState(true);
 
     useEffect(() => {
@@ -33,11 +36,14 @@ export default function DashboardPage() {
         async function load() {
             try {
                 if (user) {
-                    const [coursesData, testsData] = await Promise.all([
+                    const [coursesData, testsData, activity] = await Promise.all([
                         getCourses(supabase, user.id, controller.signal),
                         getTestResults(supabase, user.id, controller.signal),
+                        getStudyActivity(supabase, user.id, controller.signal),
                     ]);
                     setCourses(coursesData);
+                    setTests(testsData);
+                    setStudyDays(activity);
                     if (testsData.length > 0) setLastTest(testsData[0]);
                 }
             } catch (err) {
@@ -65,6 +71,13 @@ export default function DashboardPage() {
     const totalTopics = courses.reduce((acc, c) => acc + c.modules.reduce((a, m) => a + m.topics.length, 0), 0);
     const completedTopics = courses.reduce((acc, c) => acc + c.modules.reduce((a, m) => a + m.topics.filter(t => t.completed).length, 0), 0);
     const completionPercent = totalTopics > 0 ? Math.round((completedTopics / totalTopics) * 100) : 0;
+    // Worked out from tests and study time (see lib/studyStats.ts).
+    const estimate = estimatedScore(tests);
+    const streak = studyStreak([
+        ...studyDays.filter(d => d.minutes > 0).map(d => d.day),
+        ...tests.map(t => localDay(new Date(t.date))),
+    ]);
+    const hours = studyHours(studyDays);
 
     return (
         <AppLayout>
@@ -81,15 +94,20 @@ export default function DashboardPage() {
                         <div className="stat-icon" style={{ background: 'rgba(37, 99, 235, 0.15)', color: 'var(--brand-accent-light)' }}>
                             <Target size={20} />
                         </div>
-                        <div className="stat-value">{profile?.estimated_score || 0}</div>
-                        <div className="stat-label">Estimated IMAT Score</div>
+                        <div className="stat-value">
+                            {estimate === null ? '—' : estimate}
+                            <span style={{ fontSize: '0.5em', fontWeight: 500, color: 'var(--text-tertiary)' }}> / {IMAT_MAX}</span>
+                        </div>
+                        <div className="stat-label" title="Your last 5 tests combined, scaled to the 90-point IMAT">
+                            {estimate === null ? 'Estimated IMAT Score · take a test' : 'Estimated IMAT Score · last 5 tests'}
+                        </div>
                     </div>
                     <div className="stat-card">
                         <div className="stat-icon" style={{ background: 'rgba(239, 68, 68, 0.15)', color: 'var(--color-danger-light)' }}>
                             <Flame size={20} />
                         </div>
-                        <div className="stat-value">{profile?.study_streak || 0} days</div>
-                        <div className="stat-label">Study Streak 🔥</div>
+                        <div className="stat-value">{streak} {streak === 1 ? 'day' : 'days'}</div>
+                        <div className="stat-label" title="Days in a row you studied or took a test">Study Streak 🔥</div>
                     </div>
                     <div className="stat-card">
                         <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.15)', color: 'var(--color-success-light)' }}>
@@ -102,8 +120,8 @@ export default function DashboardPage() {
                         <div className="stat-icon" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' }}>
                             <Clock size={20} />
                         </div>
-                        <div className="stat-value">{profile?.total_study_hours || 0}h</div>
-                        <div className="stat-label">Total Study Hours</div>
+                        <div className="stat-value">{hours}h</div>
+                        <div className="stat-label" title="Time active on lessons, tests, Memotive and the study planner">Total Study Hours</div>
                     </div>
                 </div>
 
@@ -253,8 +271,8 @@ export default function DashboardPage() {
                         <span className="text-sm text-secondary">
                             {[
                                 !!lastTest,
-                                profile?.study_streak && profile.study_streak >= 3,
-                                profile?.study_streak && profile.study_streak >= 7,
+                                streak >= 3,
+                                streak >= 7,
                                 completedTopics >= 5,
                                 completedTopics >= 20,
                                 lastTest && lastTest.mode === 'timed',
@@ -268,8 +286,8 @@ export default function DashboardPage() {
                     <div className="milestones-row">
                         {[
                             { icon: '🎯', label: 'First Test', unlocked: !!lastTest, tooltip: 'Complete your first test' },
-                            { icon: '🔥', label: '3-Day Streak', unlocked: !!(profile?.study_streak && profile.study_streak >= 3), tooltip: 'Study for 3 days in a row' },
-                            { icon: '🔥', label: '7-Day Streak', unlocked: !!(profile?.study_streak && profile.study_streak >= 7), tooltip: 'Study for 7 days straight' },
+                            { icon: '🔥', label: '3-Day Streak', unlocked: streak >= 3, tooltip: 'Study for 3 days in a row' },
+                            { icon: '🔥', label: '7-Day Streak', unlocked: streak >= 7, tooltip: 'Study for 7 days straight' },
                             { icon: '📚', label: '5 Topics', unlocked: completedTopics >= 5, tooltip: 'Complete 5 topics' },
                             { icon: '📖', label: '20 Topics', unlocked: completedTopics >= 20, tooltip: 'Complete 20 topics' },
                             { icon: '⏱️', label: 'Simulation', unlocked: !!(lastTest && lastTest.mode === 'timed'), tooltip: 'Complete a timed exam simulation' },
