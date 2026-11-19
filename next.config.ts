@@ -20,6 +20,16 @@ const nextConfig: NextConfig = {
                     { key: 'X-XSS-Protection', value: '1; mode=block' },
                 ],
             },
+            {
+                // Self-contained tools shown inside our own pages (the study
+                // planner at /study-planner). Same-site framing only; listed
+                // after the rule above, so this value wins for these paths.
+                source: '/embed/:path*',
+                headers: [
+                    { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+                    { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+                ],
+            },
         ];
     },
 };

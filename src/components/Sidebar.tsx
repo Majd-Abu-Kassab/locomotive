@@ -21,6 +21,7 @@ import {
     Receipt,
     X,
     Brain,
+    CalendarRange,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
@@ -41,6 +42,7 @@ const baseNavItems = [
         category: 'STUDY',
         items: [
             { name: 'Schedule', href: '/schedule', icon: Calendar },
+            { name: 'Study Planner', href: '/study-planner', icon: CalendarRange },
             { name: 'Memotive', href: '/memotive', icon: Brain },
         ],
     },
