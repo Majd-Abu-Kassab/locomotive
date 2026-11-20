@@ -68,6 +68,8 @@ export interface QuestionRow {
     image_url?: string | null;
     /** The quiz lesson (topics.id) this question is in; null = course bank only. */
     lesson_id?: string | null;
+    /** Create Test topic (question_topics.id); null = untagged. */
+    topic_id?: string | null;
 }
 
 export interface TestResultRow {
@@ -196,6 +198,125 @@ export async function getQuestions(supabase: SupabaseClient, filters?: {
         ...q,
         options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
     }));
+}
+
+// ===== CREATE TEST: COURSE › SUBJECT › TOPIC =====
+// Question tags (supabase/question-topics.sql), separate from the lesson structure.
+
+export interface PickerTopic { id: string; name: string; count: number | null }
+export interface PickerSubject { id: string; name: string; topics: PickerTopic[] }
+export interface PickerCourse {
+    id: string;
+    name: string;
+    icon: string;
+    color: string;
+    subjects: PickerSubject[];
+    /** Questions in this course with no topic; null if counts couldn't load. */
+    untagged: number | null;
+}
+
+/** Courses with their subjects and topics, leaving out anything with no questions. */
+export async function getQuestionTopicTree(supabase: SupabaseClient, signal?: AbortSignal): Promise<PickerCourse[]> {
+    const [courses, subjects, topics, counts] = await Promise.all([
+        supabase.from('courses').select('id, name, icon, color').order('sort_order').abortSignal(signal!),
+        supabase.from('question_subjects').select('id, course_id, name').order('sort_order').order('name').abortSignal(signal!),
+        supabase.from('question_topics').select('id, subject_id, name').order('sort_order').order('name').abortSignal(signal!),
+        supabase.from('question_topic_counts').select('course_name, topic_id, questions').abortSignal(signal!),
+    ]);
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (courses.error) throw courses.error;
+
+    // Without counts (e.g. before the migration has run) show every course whole.
+    const known = !counts.error;
+    const byTopic = new Map<string, number>();
+    const untaggedByCourse = new Map<string, number>();
+    for (const r of counts.data ?? []) {
+        const map = r.topic_id ? byTopic : untaggedByCourse;
+        const key = r.topic_id ?? r.course_name;
+        map.set(key, (map.get(key) ?? 0) + r.questions);
+    }
+
+    return (courses.data ?? []).map(c => {
+        const courseSubjects = (subjects.data ?? [])
+            .filter(s => s.course_id === c.id)
+            .map(s => ({
+                id: s.id,
+                name: s.name,
+                topics: (topics.data ?? [])
+                    .filter(t => t.subject_id === s.id)
+                    .map(t => ({ id: t.id, name: t.name, count: known ? byTopic.get(t.id) ?? 0 : null }))
+                    .filter(t => t.count !== 0),
+            }))
+            .filter(s => s.topics.length > 0);
+        return {
+            id: c.id, name: c.name, icon: c.icon, color: c.color,
+            subjects: courseSubjects,
+            untagged: known ? untaggedByCourse.get(c.name) ?? 0 : null,
+        };
+    }).filter(c => c.subjects.length > 0 || c.untagged !== 0);
+}
+
+/** What a student picked: whole courses, single topics, and courses' untagged questions. */
+export interface QuestionPick {
+    courses: string[];
+    topicIds: string[];
+    untaggedCourses: string[];
+}
+
+const PREMIUM_SOURCE = 'locomotive-original';
+
+/** PostgREST filter value in double quotes, so names with commas or brackets work. */
+const pgQuote = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+
+/**
+ * A random set of questions for Create Test. `pick` null = every topic.
+ * `matched` counts questions matching the filters before premium ones are
+ * dropped, so the caller can tell "nothing matched" from "all premium".
+ */
+export async function drawQuestions(supabase: SupabaseClient, opts: {
+    pick: QuestionPick | null;
+    difficulty: string;
+    source: string;
+    count: number;
+    includePremium: boolean;
+}): Promise<{ questions: QuestionRow[]; matched: number }> {
+    const parts = opts.pick && [
+        ...opts.pick.courses.map(c => `subject.eq.${pgQuote(c)}`),
+        ...(opts.pick.topicIds.length ? [`topic_id.in.(${opts.pick.topicIds.join(',')})`] : []),
+        ...opts.pick.untaggedCourses.map(c => `and(subject.eq.${pgQuote(c)},topic_id.is.null)`),
+    ];
+    if (parts && parts.length === 0) return { questions: [], matched: 0 };
+
+    // Every matching id (light), then a random draw, then the full rows of the
+    // drawn ones. Paged because the API returns at most 1000 rows at a time.
+    const PAGE = 1000;
+    const pool: { id: string; source: string }[] = [];
+    for (let from = 0; ; from += PAGE) {
+        let q = supabase.from('questions').select('id, source');
+        if (parts) q = q.or(parts.join(','));
+        if (opts.difficulty !== 'all') q = q.eq('difficulty', opts.difficulty);
+        if (opts.source !== 'all') q = q.eq('source', opts.source);
+        const { data, error } = await q.order('id').range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        pool.push(...data);
+        if (data.length < PAGE) break;
+    }
+
+    const eligible = opts.includePremium ? pool : pool.filter(q => q.source !== PREMIUM_SOURCE);
+    for (let i = eligible.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [eligible[i], eligible[j]] = [eligible[j], eligible[i]];
+    }
+    const ids = eligible.slice(0, opts.count).map(q => q.id);
+    if (ids.length === 0) return { questions: [], matched: pool.length };
+
+    const { data, error } = await supabase.from('questions').select('*').in('id', ids);
+    if (error) throw new Error(error.message);
+    const byId = new Map((data ?? []).map(q => [q.id, {
+        ...q,
+        options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
+    } as QuestionRow]));
+    return { questions: ids.flatMap(id => byId.get(id) ?? []), matched: pool.length };
 }
 
 // ===== TEST RESULTS =====
@@ -433,6 +554,7 @@ export async function adminSaveQuestion(supabase: SupabaseClient, question: {
     year: number | null;
     image_url?: string | null;
     lesson_id?: string | null;
+    topic_id?: string | null;
 }): Promise<{ error: Error | null }> {
     const dbQ = { ...question, options: JSON.stringify(question.options) };
     const { error } = await supabase.from('questions').upsert(dbQ, { onConflict: 'id' });
@@ -460,6 +582,7 @@ export async function adminBulkImportQuestions(
         source: string;
         year: number | null;
         lesson_id?: string | null;
+        topic_id?: string | null;
     }[]
 ): Promise<{ imported: number; error: Error | null }> {
     if (questions.length === 0) return { imported: 0, error: null };
@@ -468,19 +591,124 @@ export async function adminBulkImportQuestions(
     return { imported: error ? 0 : questions.length, error: error ? new Error(error.message) : null };
 }
 
-/** Move questions into a quiz (or back to the course bank with lessonId null). */
+/** Ids in groups of 100, so the list (sent in the URL) stays a safe length. */
+function chunks<T>(items: T[], size = 100): T[][] {
+    const out: T[][] = [];
+    for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+    return out;
+}
+
+/**
+ * Move questions into a quiz (or back to the course bank with lessonId null).
+ * Questions coming from another course lose their topic, which belongs to
+ * that other course.
+ */
 export async function adminMoveQuestions(
     supabase: SupabaseClient,
     questionIds: string[],
     target: { subject: string; lessonId: string | null },
 ): Promise<{ error: Error | null }> {
-    // Batches keep the id list (sent in the URL) a safe length.
-    for (let i = 0; i < questionIds.length; i += 100) {
-        const { error } = await supabase
-            .from('questions')
-            .update({ subject: target.subject, lesson_id: target.lessonId })
-            .in('id', questionIds.slice(i, i + 100));
+    for (const ids of chunks(questionIds)) {
+        const fromOther = await supabase.from('questions')
+            .update({ subject: target.subject, lesson_id: target.lessonId, topic_id: null })
+            .in('id', ids).neq('subject', target.subject);
+        if (fromOther.error) return { error: new Error(fromOther.error.message) };
+        const sameCourse = await supabase.from('questions')
+            .update({ lesson_id: target.lessonId })
+            .in('id', ids).eq('subject', target.subject);
+        if (sameCourse.error) return { error: new Error(sameCourse.error.message) };
+    }
+    return { error: null };
+}
+
+/** Permanently delete questions (and students' saved answers to them). */
+export async function adminDeleteQuestions(supabase: SupabaseClient, questionIds: string[]): Promise<{ error: Error | null }> {
+    for (const ids of chunks(questionIds)) {
+        const { error } = await supabase.from('questions').delete().in('id', ids);
         if (error) return { error: new Error(error.message) };
+    }
+    return { error: null };
+}
+
+// ===== ADMIN: QUESTION SUBJECTS & TOPICS (supabase/question-topics.sql) =====
+export interface QuestionSubjectRow { id: string; course_id: string; name: string; sort_order: number }
+export interface QuestionTopicRow { id: string; subject_id: string; name: string; sort_order: number }
+
+/** Every subject and topic, including empty ones. Empty lists if the tables aren't there yet. */
+export async function getQuestionTaxonomy(supabase: SupabaseClient, signal?: AbortSignal): Promise<{ subjects: QuestionSubjectRow[]; topics: QuestionTopicRow[] }> {
+    const [s, t] = await Promise.all([
+        supabase.from('question_subjects').select('id, course_id, name, sort_order').order('sort_order').order('name').abortSignal(signal!),
+        supabase.from('question_topics').select('id, subject_id, name, sort_order').order('sort_order').order('name').abortSignal(signal!),
+    ]);
+    if (s.error) throwIfAborted(s.error, signal);
+    if (t.error) throwIfAborted(t.error, signal);
+    if (s.error || t.error) console.error('Error fetching subjects and topics:', s.error ?? t.error);
+    return { subjects: s.data ?? [], topics: t.data ?? [] };
+}
+
+function nameError(error: { code?: string; message: string }, what: string): Error {
+    return new Error(error.code === '23505' ? `There's already a ${what} with that name.` : error.message);
+}
+
+/** Add a subject to a course, or rename one (with id). */
+export async function adminSaveQuestionSubject(supabase: SupabaseClient, subject: { id?: string; course_id: string; name: string }): Promise<{ error: Error | null }> {
+    const name = subject.name.trim();
+    const { error } = subject.id
+        ? await supabase.from('question_subjects').update({ name }).eq('id', subject.id)
+        : await supabase.from('question_subjects').insert({ course_id: subject.course_id, name });
+    return { error: error ? nameError(error, 'subject in this course') : null };
+}
+
+/** Deletes the subject and its topics; their questions stay, untagged. */
+export async function adminDeleteQuestionSubject(supabase: SupabaseClient, id: string): Promise<{ error: Error | null }> {
+    const { error } = await supabase.from('question_subjects').delete().eq('id', id);
+    return { error: error ? new Error(error.message) : null };
+}
+
+/** Add a topic to a subject, or rename one (with id). */
+export async function adminSaveQuestionTopic(supabase: SupabaseClient, topic: { id?: string; subject_id: string; name: string }): Promise<{ error: Error | null }> {
+    const name = topic.name.trim();
+    const { error } = topic.id
+        ? await supabase.from('question_topics').update({ name }).eq('id', topic.id)
+        : await supabase.from('question_topics').insert({ subject_id: topic.subject_id, name });
+    if (error) return { error: nameError(error, 'topic in this subject') };
+    // Keep the questions' topic text (shown in analytics) in step with a rename.
+    if (topic.id) {
+        const sync = await supabase.from('questions').update({ topic: name }).eq('topic_id', topic.id);
+        if (sync.error) return { error: new Error(sync.error.message) };
+    }
+    return { error: null };
+}
+
+/** Deletes the topic; its questions stay, untagged. */
+export async function adminDeleteQuestionTopic(supabase: SupabaseClient, id: string): Promise<{ error: Error | null }> {
+    const { error } = await supabase.from('question_topics').delete().eq('id', id);
+    return { error: error ? new Error(error.message) : null };
+}
+
+/**
+ * Put questions in a topic, or take them out of theirs (target null). A topic
+ * belongs to one course, so questions from another course move to that
+ * course too, leaving their old course's quiz.
+ */
+export async function adminSetQuestionsTopic(
+    supabase: SupabaseClient,
+    questionIds: string[],
+    target: { topicId: string; topicName: string; courseName: string } | null,
+): Promise<{ error: Error | null }> {
+    for (const ids of chunks(questionIds)) {
+        if (!target) {
+            const { error } = await supabase.from('questions').update({ topic_id: null }).in('id', ids);
+            if (error) return { error: new Error(error.message) };
+            continue;
+        }
+        const tag = { topic_id: target.topicId, topic: target.topicName };
+        const fromOther = await supabase.from('questions')
+            .update({ ...tag, subject: target.courseName, lesson_id: null })
+            .in('id', ids).neq('subject', target.courseName);
+        if (fromOther.error) return { error: new Error(fromOther.error.message) };
+        const sameCourse = await supabase.from('questions').update(tag).in('id', ids).eq('subject', target.courseName);
+        if (sameCourse.error) return { error: new Error(sameCourse.error.message) };
     }
     return { error: null };
 }
@@ -511,13 +739,23 @@ export async function adminUpdateTopicContent(supabase: SupabaseClient, topicId:
 }
 
 export async function getAllQuestions(supabase: SupabaseClient, signal?: AbortSignal): Promise<QuestionRow[]> {
-    const { data, error } = await supabase.from('questions').select('*').order('subject').order('topic').abortSignal(signal!);
-    if (error) {
-        throwIfAborted(error, signal);
-        console.error('Error fetching all questions:', error);
-        return [];
+    // The API returns at most 1000 rows per request, so page through them all.
+    const PAGE = 1000;
+    const data: QuestionRow[] = [];
+    for (let from = 0; ; from += PAGE) {
+        const { data: page, error } = await supabase.from('questions').select('*')
+            .order('subject').order('topic').order('id')
+            .range(from, from + PAGE - 1)
+            .abortSignal(signal!);
+        if (error) {
+            throwIfAborted(error, signal);
+            console.error('Error fetching all questions:', error);
+            return [];
+        }
+        data.push(...page);
+        if (page.length < PAGE) break;
     }
-    return (data || []).map(q => ({
+    return data.map(q => ({
         ...q,
         options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
     }));

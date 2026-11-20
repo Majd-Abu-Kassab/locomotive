@@ -8,7 +8,7 @@ import {
     AlertTriangle, Layers, Users, CreditCard, Tag, CheckCircle, XCircle,
     Gift, BarChart2, TrendingUp, TrendingDown, Activity, Award,
     Upload, FileText, Image as ImageIcon, Shield, UserCog, Search, Crown,
-    ArrowLeft, FolderTree, Video, FileQuestion, Bell, Send, MessageSquare, Mail
+    ArrowLeft, FolderTree, Video, FileQuestion, Bell, Send, MessageSquare, Mail, Tags, Check
 } from 'lucide-react';
 import { RichTextToolbar, RichTextPreview } from '@/components/RichTextEditor';
 import { useAuth } from '@/contexts/AuthContext';
@@ -19,7 +19,9 @@ import { toRichText, toPlainText } from '@/lib/richText';
 import {
     getCourses, getAllQuestions,
     adminSaveCourse, adminDeleteCourse,
-    adminSaveQuestion, adminDeleteQuestion, adminBulkImportQuestions, adminMoveQuestions,
+    adminSaveQuestion, adminDeleteQuestion, adminBulkImportQuestions, adminMoveQuestions, adminDeleteQuestions,
+    getQuestionTaxonomy, adminSaveQuestionSubject, adminDeleteQuestionSubject, adminSaveQuestionTopic, adminDeleteQuestionTopic,
+    adminSetQuestionsTopic, QuestionSubjectRow, QuestionTopicRow,
     adminSaveSection, adminDeleteSection, adminAssignModulesToSection, adminUpdateCoursePaymentSettings,
     adminGetAllStudentAccess, adminGrantAccess, adminRevokeAccess,
     adminGetAllPayments, adminGetCoupons, adminSaveCoupon, adminToggleCoupon,
@@ -78,6 +80,91 @@ function QuizSelect({ places, courseName, value, onChange, id }: {
                 </optgroup>
             ))}
         </select>
+    );
+}
+
+// ── Subjects and topics (Create Test's Course › Subject › Topic) ──
+
+const TAX_ROW: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 'var(--space-2)' };
+
+/** Topic picker for one course, grouped by subject. Empty value = no topic. */
+function TopicSelect({ courseId, subjects, topics, value, onChange, id }: {
+    courseId: string | undefined;
+    subjects: QuestionSubjectRow[];
+    topics: QuestionTopicRow[];
+    value: string | null | undefined;
+    onChange: (topicId: string | null) => void;
+    id?: string;
+}) {
+    const inCourse = subjects.filter(s => s.course_id === courseId);
+    return (
+        <select id={id} className="select" value={value ?? ''} onChange={e => onChange(e.target.value || null)} disabled={!courseId}>
+            <option value="">No topic yet</option>
+            {inCourse.map(s => (
+                <optgroup key={s.id} label={s.name}>
+                    {topics.filter(t => t.subject_id === s.id).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </optgroup>
+            ))}
+        </select>
+    );
+}
+
+/** A subject or topic name with a question count, rename in place, and delete. */
+function TaxonomyRow({ name, count, onRename, onDelete, strong }: {
+    name: string;
+    count: number;
+    onRename: (name: string) => Promise<boolean>;
+    onDelete: () => void;
+    strong?: boolean;
+}) {
+    const [editing, setEditing] = useState(false);
+    const [value, setValue] = useState(name);
+    const [busy, setBusy] = useState(false);
+    const save = async () => {
+        const next = value.trim();
+        if (!next || next === name) { setEditing(false); setValue(name); return; }
+        setBusy(true);
+        if (await onRename(next)) setEditing(false);
+        setBusy(false);
+    };
+    if (editing) {
+        return (
+            <form style={TAX_ROW} onSubmit={e => { e.preventDefault(); save(); }}>
+                <input className="input" value={value} onChange={e => setValue(e.target.value)} maxLength={120} autoFocus aria-label={`New name for ${name}`} />
+                <button type="submit" className="btn btn-primary btn-sm" disabled={busy} aria-label="Save name">
+                    {busy ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={14} />}
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditing(false); setValue(name); }} aria-label="Cancel"><X size={14} /></button>
+            </form>
+        );
+    }
+    return (
+        <div style={TAX_ROW}>
+            <span style={{ fontWeight: strong ? 600 : 400, flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{name}</span>
+            <span className="text-xs text-secondary" style={{ whiteSpace: 'nowrap' }}>{count} question{count === 1 ? '' : 's'}</span>
+            <button className="btn btn-ghost btn-sm" style={{ padding: 4 }} onClick={() => { setValue(name); setEditing(true); }} aria-label={`Rename ${name}`}><Edit3 size={14} /></button>
+            <button className="btn btn-ghost btn-sm" style={{ padding: 4, color: 'var(--color-danger)' }} onClick={onDelete} aria-label={`Delete ${name}`}><Trash2 size={14} /></button>
+        </div>
+    );
+}
+
+/** "New subject…" / "New topic…" input with an Add button. */
+function AddNameRow({ placeholder, label, onAdd }: { placeholder: string; label: string; onAdd: (name: string) => Promise<boolean> }) {
+    const [value, setValue] = useState('');
+    const [busy, setBusy] = useState(false);
+    return (
+        <form style={TAX_ROW} onSubmit={async e => {
+            e.preventDefault();
+            if (!value.trim()) return;
+            setBusy(true);
+            if (await onAdd(value.trim())) setValue('');
+            setBusy(false);
+        }}>
+            <input className="input" value={value} onChange={e => setValue(e.target.value)} placeholder={placeholder} maxLength={120} aria-label={placeholder} />
+            <button type="submit" className="btn btn-secondary btn-sm" disabled={busy || !value.trim()} style={{ whiteSpace: 'nowrap' }}>
+                {busy ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={14} />} {label}
+            </button>
+        </form>
     );
 }
 
@@ -159,7 +246,17 @@ export default function AdminPage() {
     const [importLessonId, setImportLessonId] = useState<string | null>(null);
     const [importDifficulty, setImportDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
     const [importSource, setImportSource] = useState<QuestionRow['source']>('official-imat');
-    // Questions tab: move the questions currently shown into a quiz.
+    const [importTopicId, setImportTopicId] = useState<string | null>(null);
+    // Questions tab: subjects and topics, the course/subject/topic filter
+    // ('' | 'course:<name>' | 'subject:<id>' | 'topic:<id>' | 'none:<course name>'),
+    // and ticked questions for the batch actions (move to a topic or quiz, delete).
+    const [qSubjects, setQSubjects] = useState<QuestionSubjectRow[]>([]);
+    const [qTopics, setQTopics] = useState<QuestionTopicRow[]>([]);
+    const [questionScope, setQuestionScope] = useState('');
+    const [selectedQIds, setSelectedQIds] = useState<Set<string>>(new Set());
+    const [topicTarget, setTopicTarget] = useState('');
+    const [taxonomyOpen, setTaxonomyOpen] = useState(false);
+    const [taxonomyCourseId, setTaxonomyCourseId] = useState('');
     const [moveTarget, setMoveTarget] = useState('');
     const [moving, setMoving] = useState(false);
     const [importItems, setImportItems] = useState<ParsedItem[]>([]);
@@ -238,12 +335,15 @@ export default function AdminPage() {
         const controller = new AbortController();
         async function load() {
             try {
-                const [c, q] = await Promise.all([
+                const [c, q, tax] = await Promise.all([
                     getCourses(supabase, undefined, controller.signal),
-                    getAllQuestions(supabase, controller.signal)
+                    getAllQuestions(supabase, controller.signal),
+                    getQuestionTaxonomy(supabase, controller.signal),
                 ]);
                 setCourses(c);
                 setQuestions(q);
+                setQSubjects(tax.subjects);
+                setQTopics(tax.topics);
                 setLoading(false);
             } catch (err) {
                 if (isAbortError(err)) return;
@@ -402,6 +502,8 @@ export default function AdminPage() {
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Course deleted', 'success');
             setCourses(prev => prev.filter(c => c.id !== courseId));
+            if (taxonomyCourseId === courseId) setTaxonomyCourseId('');
+            await reloadTaxonomy(); // its subjects and topics went with it
         }
     };
 
@@ -468,10 +570,13 @@ export default function AdminPage() {
     const handleSaveQuestion = async () => {
         if (!editingQuestion || !editingQuestion.id || !editingQuestion.stem) return;
         setSavingQuestion(true);
+        const tagged = editingQuestion.topic_id ? topicById.get(editingQuestion.topic_id) : undefined;
         const { error } = await adminSaveQuestion(supabase, {
             id: editingQuestion.id,
             subject: editingQuestion.subject || '',
-            topic: editingQuestion.topic || '',
+            // The topic text (shown in analytics) follows the chosen topic.
+            topic: tagged?.name ?? editingQuestion.topic ?? '',
+            topic_id: tagged?.id ?? null,
             difficulty: editingQuestion.difficulty || 'medium',
             stem: editingQuestion.stem,
             options: editingQuestion.options || ['A) ', 'B) ', 'C) ', 'D) ', 'E) '],
@@ -492,10 +597,12 @@ export default function AdminPage() {
     };
 
     const handleDeleteQuestion = async (qId: string) => {
+        if (!confirm('Delete this question? This can’t be undone, and it also disappears from students’ past test reviews.')) return;
         const { error } = await adminDeleteQuestion(supabase, qId);
         if (error) { addToast(error.message, 'error'); } else {
             addToast('Question deleted', 'success');
             setQuestions(prev => prev.filter(q => q.id !== qId));
+            setSelectedQIds(prev => { const next = new Set(prev); next.delete(qId); return next; });
             setCourses(await getCourses(supabase)); // quiz question counts
         }
     };
@@ -520,14 +627,17 @@ export default function AdminPage() {
         if (!courseName) { addToast('Select a course for these questions.', 'warning'); return; }
         if (importItems.length === 0) { addToast('No valid questions to import.', 'warning'); return; }
         setImporting(true);
+        const importTopic = importTopicId ? topicById.get(importTopicId) : undefined;
         const rows = importItems.map((it, i) => ({
             id: `imp-${slugify(courseName)}-${slugify(it.topic)}-${i + 1}-${Math.random().toString(36).slice(2, 6)}`,
             // subject links the question to its course (question.subject === course.name);
-            // lesson_id puts it in a specific quiz (null = course bank only).
+            // lesson_id puts it in a specific quiz (null = course bank only);
+            // topic_id is its Create Test topic (null = sort later).
             // source is a fixed provenance vocabulary (DB CHECK) chosen in the form.
             subject: courseName,
             lesson_id: importLessonId,
-            topic: it.topic,
+            topic_id: importTopic?.id ?? null,
+            topic: importTopic?.name ?? it.topic,
             difficulty: importDifficulty,
             stem: it.stem,
             options: it.options,
@@ -550,26 +660,125 @@ export default function AdminPage() {
         setCourses(await getCourses(supabase));
     };
 
-    // Move every question currently shown in the table into a quiz, or back to
-    // a course's bank. moveTarget is "quiz:<lessonId>" or "bank:<courseName>".
+    const plural = (n: number, word = 'question') => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+    // Move the ticked questions into a quiz, or back to a course's bank.
+    // moveTarget is "quiz:<lessonId>" or "bank:<courseName>".
     const handleMoveQuestions = async () => {
-        if (!moveTarget || filteredQuestions.length === 0) return;
+        const picked = selectedShown;
+        if (!moveTarget || picked.length === 0) return;
         const [kind, ref] = [moveTarget.slice(0, 4), moveTarget.slice(5)];
         const place = kind === 'quiz' ? placeById.get(ref) : undefined;
         const target = place
             ? { subject: place.course.name, lessonId: place.id }
             : { subject: ref, lessonId: null };
         const where = place ? `${place.module.name} › ${place.label}` : `the ${ref} question bank (no quiz)`;
-        const n = filteredQuestions.length;
-        if (!confirm(`Move the ${n} question${n === 1 ? '' : 's'} shown to ${where}?`)) return;
+        const otherCourse = picked.filter(q => q.subject !== target.subject && q.topic_id).length;
+        if (!confirm(`Move ${plural(picked.length)} to ${where}?` + (otherCourse
+            ? `\n\n${plural(otherCourse)} ${otherCourse === 1 ? 'comes' : 'come'} from another course and will lose ${otherCourse === 1 ? 'its' : 'their'} topic, since topics belong to one course.`
+            : ''))) return;
         setMoving(true);
-        const { error } = await adminMoveQuestions(supabase, filteredQuestions.map(q => q.id), target);
+        const { error } = await adminMoveQuestions(supabase, picked.map(q => q.id), target);
         setMoving(false);
         if (error) { addToast('Move failed: ' + error.message, 'error'); return; }
-        addToast(`Moved ${n} question${n === 1 ? '' : 's'} to ${where}.`, 'success');
+        addToast(`Moved ${plural(picked.length)} to ${where}.`, 'success');
         setMoveTarget('');
+        setSelectedQIds(new Set());
         setQuestions(await getAllQuestions(supabase));
         setCourses(await getCourses(supabase));
+    };
+
+    // Put the ticked questions in a topic, or take them out of theirs.
+    // topicTarget is a topic id, or "none".
+    const handleSetTopic = async () => {
+        const picked = selectedShown;
+        if (!topicTarget || picked.length === 0) return;
+        let target: { topicId: string; topicName: string; courseName: string } | null = null;
+        let message = picked.length === 1
+            ? 'Take 1 question out of its topic? It stays in its course and quiz.'
+            : `Take ${plural(picked.length)} out of their topics? They stay in their course and quiz.`;
+        if (topicTarget !== 'none') {
+            const t = topicById.get(topicTarget);
+            const s = t && subjectById.get(t.subject_id);
+            const c = s && courses.find(c => c.id === s.course_id);
+            if (!t || !s || !c) return;
+            target = { topicId: t.id, topicName: t.name, courseName: c.name };
+            const otherCourse = picked.filter(q => q.subject !== c.name).length;
+            message = `Move ${plural(picked.length)} to ${c.name} › ${s.name} › ${t.name}?` + (otherCourse
+                ? `\n\n${plural(otherCourse)} ${otherCourse === 1 ? 'is' : 'are'} in another course and will move to ${c.name} too, leaving ${otherCourse === 1 ? 'its' : 'their'} current quiz.`
+                : '');
+        }
+        if (!confirm(message)) return;
+        setMoving(true);
+        const { error } = await adminSetQuestionsTopic(supabase, picked.map(q => q.id), target);
+        setMoving(false);
+        if (error) { addToast('Move failed: ' + error.message, 'error'); return; }
+        addToast(target ? `Moved ${plural(picked.length)} to ${target.topicName}.` : `Removed the topic from ${plural(picked.length)}.`, 'success');
+        setTopicTarget('');
+        setSelectedQIds(new Set());
+        setQuestions(await getAllQuestions(supabase));
+        setCourses(await getCourses(supabase)); // a course change can take questions out of a quiz
+    };
+
+    const handleDeleteSelected = async () => {
+        const picked = selectedShown;
+        if (picked.length === 0) return;
+        if (!confirm(`Permanently delete ${plural(picked.length)}? This can’t be undone, and they also disappear from students’ past test reviews.`)) return;
+        setMoving(true);
+        const { error } = await adminDeleteQuestions(supabase, picked.map(q => q.id));
+        setMoving(false);
+        // Reload either way: a failure part-way through may have deleted some.
+        setSelectedQIds(new Set());
+        setQuestions(await getAllQuestions(supabase));
+        setCourses(await getCourses(supabase)); // quiz question counts
+        if (error) { addToast('Delete failed: ' + error.message, 'error'); return; }
+        addToast(`Deleted ${plural(picked.length)}.`, 'success');
+    };
+
+    // ===== SUBJECT & TOPIC HANDLERS =====
+    const reloadTaxonomy = async () => {
+        const tax = await getQuestionTaxonomy(supabase);
+        setQSubjects(tax.subjects);
+        setQTopics(tax.topics);
+    };
+
+    const handleSaveQSubject = async (subject: { id?: string; course_id: string; name: string }) => {
+        const { error } = await adminSaveQuestionSubject(supabase, subject);
+        if (error) { addToast(error.message, 'error'); return false; }
+        await reloadTaxonomy();
+        return true;
+    };
+
+    const handleDeleteQSubject = async (subject: QuestionSubjectRow) => {
+        const topicIds = new Set(qTopics.filter(t => t.subject_id === subject.id).map(t => t.id));
+        const n = questions.filter(q => q.topic_id && topicIds.has(q.topic_id)).length;
+        if (!confirm(`Delete the subject “${subject.name}” and its ${plural(topicIds.size, 'topic')}?`
+            + (n ? `\n\nIts ${plural(n)} stay in the course, without a topic.` : ''))) return;
+        const { error } = await adminDeleteQuestionSubject(supabase, subject.id);
+        if (error) { addToast(error.message, 'error'); return; }
+        setQuestions(prev => prev.map(q => q.topic_id && topicIds.has(q.topic_id) ? { ...q, topic_id: null } : q));
+        if (questionScope === `subject:${subject.id}` || [...topicIds].some(id => questionScope === `topic:${id}`)) setQuestionScope('');
+        await reloadTaxonomy();
+        addToast(`Deleted ${subject.name}.`, 'success');
+    };
+
+    const handleSaveQTopic = async (topic: { id?: string; subject_id: string; name: string }) => {
+        const { error } = await adminSaveQuestionTopic(supabase, topic);
+        if (error) { addToast(error.message, 'error'); return false; }
+        if (topic.id) setQuestions(prev => prev.map(q => q.topic_id === topic.id ? { ...q, topic: topic.name } : q));
+        await reloadTaxonomy();
+        return true;
+    };
+
+    const handleDeleteQTopic = async (topic: QuestionTopicRow) => {
+        const n = questions.filter(q => q.topic_id === topic.id).length;
+        if (!confirm(`Delete the topic “${topic.name}”?` + (n ? `\n\nIts ${plural(n)} stay in the course, without a topic.` : ''))) return;
+        const { error } = await adminDeleteQuestionTopic(supabase, topic.id);
+        if (error) { addToast(error.message, 'error'); return; }
+        setQuestions(prev => prev.map(q => q.topic_id === topic.id ? { ...q, topic_id: null } : q));
+        if (questionScope === `topic:${topic.id}`) setQuestionScope('');
+        await reloadTaxonomy();
+        addToast(`Deleted ${topic.name}.`, 'success');
     };
 
     const handleQuestionImageUpload = async (file: File): Promise<string | null> => {
@@ -696,9 +905,31 @@ export default function AdminPage() {
         setSendingNotification(false);
     };
 
-    const filteredQuestions = questionFilter
-        ? questions.filter(q => q.subject.toLowerCase().includes(questionFilter.toLowerCase()) || q.topic.toLowerCase().includes(questionFilter.toLowerCase()) || q.stem.toLowerCase().includes(questionFilter.toLowerCase()))
-        : questions;
+    const subjectById = new Map(qSubjects.map(s => [s.id, s]));
+    const topicById = new Map(qTopics.map(t => [t.id, t]));
+    /** "Mathematics › Number System", or null for an untagged question. */
+    const topicPath = (topicId: string | null | undefined) => {
+        const t = topicId ? topicById.get(topicId) : undefined;
+        const s = t && subjectById.get(t.subject_id);
+        return t && s ? `${s.name} › ${t.name}` : null;
+    };
+
+    const inScope = (q: QuestionRow) => {
+        if (!questionScope) return true;
+        const i = questionScope.indexOf(':');
+        const [kind, ref] = [questionScope.slice(0, i), questionScope.slice(i + 1)];
+        const t = q.topic_id ? topicById.get(q.topic_id) : undefined;
+        if (kind === 'course') return q.subject === ref;
+        if (kind === 'subject') return t?.subject_id === ref;
+        if (kind === 'topic') return q.topic_id === ref;
+        return q.subject === ref && !t; // 'none': the course's questions with no topic
+    };
+    const search = questionFilter.trim().toLowerCase();
+    const filteredQuestions = questions.filter(q => inScope(q) && (!search
+        || [q.subject, q.topic, q.stem, topicPath(q.topic_id) ?? ''].some(text => text.toLowerCase().includes(search))));
+    // Batch actions only touch ticked questions that are on screen.
+    const selectedShown = filteredQuestions.filter(q => selectedQIds.has(q.id));
+    const allShownSelected = filteredQuestions.length > 0 && selectedShown.length === filteredQuestions.length;
 
     const places = quizPlaces(courses);
     const placeById = new Map(places.map(p => [p.id, p]));
@@ -1004,54 +1235,154 @@ export default function AdminPage() {
                 {/* ===== QUESTIONS TAB ===== */}
                 {tab === 'questions' && (
                     <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
-                            <input className="input" placeholder="Filter by subject, topic, or keyword..." value={questionFilter} onChange={e => setQuestionFilter(e.target.value)} style={{ maxWidth: 400 }} />
+                        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', flex: 1, minWidth: 0 }}>
+                                <input
+                                    className="input"
+                                    placeholder="Search questions, topics or keywords..."
+                                    value={questionFilter}
+                                    onChange={e => { setQuestionFilter(e.target.value); setSelectedQIds(new Set()); }}
+                                    style={{ maxWidth: 320 }}
+                                />
+                                <select
+                                    className="select"
+                                    aria-label="Show questions from"
+                                    value={questionScope}
+                                    onChange={e => { setQuestionScope(e.target.value); setSelectedQIds(new Set()); }}
+                                    style={{ width: 'auto', maxWidth: 320 }}
+                                >
+                                    <option value="">All courses, subjects and topics</option>
+                                    {courses.map(c => (
+                                        <optgroup key={c.id} label={c.name}>
+                                            <option value={`course:${c.name}`}>All of {c.name}</option>
+                                            {qSubjects.filter(s => s.course_id === c.id).flatMap(s => [
+                                                <option key={s.id} value={`subject:${s.id}`}>{s.name} (all topics)</option>,
+                                                ...qTopics.filter(t => t.subject_id === s.id).map(t => (
+                                                    <option key={t.id} value={`topic:${t.id}`}>{'   '}{s.name} › {t.name}</option>
+                                                )),
+                                            ])}
+                                            <option value={`none:${c.name}`}>No topic yet</option>
+                                        </optgroup>
+                                    ))}
+                                </select>
+                            </div>
                             <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+                                <button className="btn btn-secondary btn-sm" onClick={() => { setTaxonomyCourseId(prev => prev || courses[0]?.id || ''); setTaxonomyOpen(true); }}>
+                                    <Tags size={14} /> Subjects &amp; Topics
+                                </button>
                                 <button className="btn btn-secondary btn-sm" onClick={() => setImportOpen(true)}>
                                     <Upload size={14} /> Import JSON
                                 </button>
-                                <button className="btn btn-primary btn-sm" onClick={() => setEditingQuestion({ id: '', subject: '', topic: '', difficulty: 'medium', stem: '', options: ['A) ', 'B) ', 'C) ', 'D) ', 'E) '], correct_answer: 0, explanation: '', source: 'locomotive-original', year: null })}>
+                                <button className="btn btn-primary btn-sm" onClick={() => setEditingQuestion({ id: '', subject: '', topic: '', topic_id: null, difficulty: 'medium', stem: '', options: ['A) ', 'B) ', 'C) ', 'D) ', 'E) '], correct_answer: 0, explanation: '', source: 'locomotive-original', year: null })}>
                                     <Plus size={14} /> Add Question
                                 </button>
                             </div>
                         </div>
                         {filteredQuestions.length > 0 && (
-                            <div className="card" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)', marginBottom: 'var(--space-4)' }}>
-                                <span className="text-sm">
-                                    Move the <strong>{filteredQuestions.length}</strong> question{filteredQuestions.length === 1 ? '' : 's'} shown{questionFilter ? ' (filtered)' : ''} to:
-                                </span>
-                                <select className="select" value={moveTarget} onChange={e => setMoveTarget(e.target.value)} style={{ width: 'auto', minWidth: 260, flex: 1 }}>
-                                    <option value="">Choose a quiz…</option>
-                                    {courses.map(c => (
-                                        <optgroup key={c.id} label={c.name}>
-                                            <option value={`bank:${c.name}`}>No quiz — course question bank only</option>
-                                            {places.filter(p => p.course.id === c.id).map(p => (
-                                                <option key={p.id} value={`quiz:${p.id}`}>{p.module.name} › {p.label}</option>
-                                            ))}
-                                        </optgroup>
-                                    ))}
-                                </select>
-                                <button className="btn btn-primary btn-sm" onClick={handleMoveQuestions} disabled={!moveTarget || moving}>
-                                    {moving ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <FolderTree size={14} />} Move
-                                </button>
-                                <span className="text-xs text-secondary" style={{ flexBasis: '100%' }}>
-                                    Use the filter above to narrow down which questions move. Each quiz shows only the questions placed in it.
-                                </span>
+                            <div
+                                className="card"
+                                role="region"
+                                aria-label="Batch actions"
+                                style={{
+                                    display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)',
+                                    padding: 'var(--space-3) var(--space-4)', marginBottom: 'var(--space-4)',
+                                    position: 'sticky', top: 'var(--space-2)', zIndex: 5,
+                                    ...(selectedShown.length > 0 ? { borderColor: 'var(--brand-accent)' } : {}),
+                                }}
+                            >
+                                {selectedShown.length === 0 ? (
+                                    <span className="text-sm text-secondary">
+                                        Tick questions to move or delete several at once. The box in the table header ticks {filteredQuestions.length === 1 ? 'the 1' : `all ${filteredQuestions.length}`} shown.
+                                    </span>
+                                ) : (
+                                    <>
+                                        <strong className="text-sm" style={{ whiteSpace: 'nowrap' }}>{plural(selectedShown.length)} ticked</strong>
+                                        <div style={{ display: 'flex', gap: 'var(--space-2)', flex: '1 1 260px' }}>
+                                            <select className="select" aria-label="Topic to move them to" value={topicTarget} onChange={e => setTopicTarget(e.target.value)} style={{ minWidth: 0 }}>
+                                                <option value="">Move to a topic…</option>
+                                                <option value="none">No topic (take out of topic)</option>
+                                                {courses.map(c => {
+                                                    const subjects = qSubjects.filter(s => s.course_id === c.id);
+                                                    if (!qTopics.some(t => subjects.some(s => s.id === t.subject_id))) return null;
+                                                    return (
+                                                        <optgroup key={c.id} label={c.name}>
+                                                            {subjects.flatMap(s => qTopics.filter(t => t.subject_id === s.id).map(t => (
+                                                                <option key={t.id} value={t.id}>{s.name} › {t.name}</option>
+                                                            )))}
+                                                        </optgroup>
+                                                    );
+                                                })}
+                                            </select>
+                                            <button className="btn btn-primary btn-sm" onClick={handleSetTopic} disabled={!topicTarget || moving} style={{ whiteSpace: 'nowrap' }}>
+                                                <Tags size={14} /> Move
+                                            </button>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 'var(--space-2)', flex: '1 1 260px' }}>
+                                            <select className="select" aria-label="Quiz to move them to" value={moveTarget} onChange={e => setMoveTarget(e.target.value)} style={{ minWidth: 0 }}>
+                                                <option value="">Move to a quiz…</option>
+                                                {courses.map(c => (
+                                                    <optgroup key={c.id} label={c.name}>
+                                                        <option value={`bank:${c.name}`}>No quiz — course question bank only</option>
+                                                        {places.filter(p => p.course.id === c.id).map(p => (
+                                                            <option key={p.id} value={`quiz:${p.id}`}>{p.module.name} › {p.label}</option>
+                                                        ))}
+                                                    </optgroup>
+                                                ))}
+                                            </select>
+                                            <button className="btn btn-primary btn-sm" onClick={handleMoveQuestions} disabled={!moveTarget || moving} style={{ whiteSpace: 'nowrap' }}>
+                                                <FolderTree size={14} /> Move
+                                            </button>
+                                        </div>
+                                        <button className="btn btn-secondary btn-sm" onClick={handleDeleteSelected} disabled={moving} style={{ color: 'var(--color-danger)', whiteSpace: 'nowrap' }}>
+                                            <Trash2 size={14} /> Delete {selectedShown.length}
+                                        </button>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => setSelectedQIds(new Set())} disabled={moving}>Clear</button>
+                                        {moving && <Loader2 size={16} style={{ animation: 'spin 1s linear infinite', color: 'var(--text-tertiary)' }} />}
+                                    </>
+                                )}
                             </div>
                         )}
                         <div className="table-wrapper">
                             <table>
-                                <thead><tr><th>Subject</th><th>Quiz</th><th>Topic</th><th style={{ maxWidth: 300 }}>Stem</th><th>Difficulty</th><th>Source</th><th>Actions</th></tr></thead>
+                                <thead><tr>
+                                    <th style={{ width: 36 }}>
+                                        <input
+                                            type="checkbox"
+                                            aria-label={allShownSelected ? 'Untick all questions shown' : 'Tick all questions shown'}
+                                            checked={allShownSelected}
+                                            ref={el => { if (el) el.indeterminate = selectedShown.length > 0 && !allShownSelected; }}
+                                            onChange={() => setSelectedQIds(allShownSelected ? new Set() : new Set(filteredQuestions.map(q => q.id)))}
+                                            style={{ width: 16, height: 16, accentColor: 'var(--brand-accent)', cursor: 'pointer' }}
+                                        />
+                                    </th>
+                                    <th>Course</th><th>Subject › Topic</th><th>Quiz</th><th style={{ maxWidth: 300 }}>Stem</th><th>Difficulty</th><th>Source</th><th>Actions</th>
+                                </tr></thead>
                                 <tbody>
                                     {filteredQuestions.map(q => (
-                                        <tr key={q.id}>
+                                        <tr key={q.id} style={selectedQIds.has(q.id) ? { background: 'rgba(37, 99, 235, 0.08)' } : undefined}>
+                                            <td>
+                                                <input
+                                                    type="checkbox"
+                                                    aria-label={`Tick question ${toPlainText(q.stem).slice(0, 60)}`}
+                                                    checked={selectedQIds.has(q.id)}
+                                                    onChange={() => setSelectedQIds(prev => {
+                                                        const next = new Set(prev);
+                                                        if (next.has(q.id)) next.delete(q.id);
+                                                        else next.add(q.id);
+                                                        return next;
+                                                    })}
+                                                    style={{ width: 16, height: 16, accentColor: 'var(--brand-accent)', cursor: 'pointer' }}
+                                                />
+                                            </td>
                                             <td style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{q.subject}</td>
+                                            <td className="text-sm" style={{ whiteSpace: 'nowrap' }}>
+                                                {topicPath(q.topic_id) ?? <span className="text-secondary" title={q.topic ? `Old topic text: ${q.topic}` : undefined}>No topic yet</span>}
+                                            </td>
                                             <td className="text-sm" style={{ whiteSpace: 'nowrap' }}>
                                                 {q.lesson_id && placeById.get(q.lesson_id)
                                                     ? <>{placeById.get(q.lesson_id)!.module.name} › {placeById.get(q.lesson_id)!.label}</>
                                                     : <span className="text-secondary">Course bank</span>}
                                             </td>
-                                            <td className="text-secondary text-sm">{q.topic}</td>
                                             <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{toPlainText(q.stem)}</td>
                                             <td><span className={`badge ${q.difficulty === 'easy' ? 'badge-accent' : q.difficulty === 'hard' ? 'badge-danger' : ''}`}>{q.difficulty}</span></td>
                                             <td className="text-xs text-secondary">{q.source}</td>
@@ -1451,8 +1782,8 @@ export default function AdminPage() {
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
                                 <div className="input-group">
                                     <label>Course</label>
-                                    {/* A quiz belongs to one course, so changing course clears the quiz. */}
-                                    <select className="select" value={editingQuestion.subject || ''} onChange={e => setEditingQuestion({ ...editingQuestion, subject: e.target.value, lesson_id: null })}>
+                                    {/* Quizzes and topics belong to one course, so changing course clears both. */}
+                                    <select className="select" value={editingQuestion.subject || ''} onChange={e => setEditingQuestion({ ...editingQuestion, subject: e.target.value, lesson_id: null, topic_id: null })}>
                                         <option value="">Select...</option>
                                         {/* Subjects are driven by the actual courses — a question's subject
                                             must match a course name for that course's quizzes to find it.
@@ -1464,7 +1795,20 @@ export default function AdminPage() {
                                         ])).map(s => <option key={s} value={s}>{s}</option>)}
                                     </select>
                                 </div>
-                                <div className="input-group"><label>Topic</label><input className="input" value={editingQuestion.topic || ''} onChange={e => setEditingQuestion({ ...editingQuestion, topic: e.target.value })} placeholder="e.g. Genetics" /></div>
+                                <div className="input-group">
+                                    <label htmlFor="q-topic">Subject › Topic</label>
+                                    <TopicSelect
+                                        id="q-topic"
+                                        courseId={courses.find(c => c.name === editingQuestion.subject)?.id}
+                                        subjects={qSubjects}
+                                        topics={qTopics}
+                                        value={editingQuestion.topic_id}
+                                        onChange={topicId => setEditingQuestion({ ...editingQuestion, topic_id: topicId })}
+                                    />
+                                    <span className="text-xs text-secondary" style={{ marginTop: 4 }}>
+                                        Students pick topics in Create Test. Add topics under Subjects &amp; Topics.
+                                    </span>
+                                </div>
                             </div>
                             <div className="input-group">
                                 <label htmlFor="q-quiz">Module › Quiz</label>
@@ -2080,6 +2424,77 @@ export default function AdminPage() {
                 </div>
             )}
 
+            {/* ===== SUBJECTS & TOPICS MODAL ===== */}
+            {taxonomyOpen && (() => {
+                const course = courses.find(c => c.id === taxonomyCourseId);
+                const subjects = qSubjects.filter(s => s.course_id === course?.id);
+                const countFor = (topicIds: string[]) => questions.filter(q => q.topic_id && topicIds.includes(q.topic_id)).length;
+                const untagged = course ? questions.filter(q => q.subject === course.name && !topicById.has(q.topic_id ?? '')).length : 0;
+                return (
+                    <div className="modal-overlay" onClick={() => setTaxonomyOpen(false)}>
+                        <div className="modal" role="dialog" aria-label="Subjects and topics" onClick={e => e.stopPropagation()} style={{ maxWidth: 640, maxHeight: '90vh', overflowY: 'auto' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+                                <h2 style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>Subjects &amp; Topics</h2>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setTaxonomyOpen(false)} aria-label="Close"><X size={16} /></button>
+                            </div>
+                            <div className="input-group" style={{ marginBottom: 'var(--space-3)' }}>
+                                <label htmlFor="tax-course">Course</label>
+                                <select id="tax-course" className="select" value={taxonomyCourseId} onChange={e => setTaxonomyCourseId(e.target.value)}>
+                                    {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            <p className="text-xs text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
+                                Students pick from these in Create Test (Course › Subject › Topic); empty topics stay hidden from them.
+                                Deleting a subject or topic never deletes questions: they stay in the course without a topic.
+                                {untagged > 0 && <> {plural(untagged)} in {course?.name} {untagged === 1 ? 'has' : 'have'} no topic yet.</>}
+                            </p>
+                            {course && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                                    {subjects.map(s => {
+                                        const topics = qTopics.filter(t => t.subject_id === s.id);
+                                        return (
+                                            <div key={s.id} style={{ border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                                                <TaxonomyRow
+                                                    key={`${s.id}:${s.name}`}
+                                                    strong
+                                                    name={s.name}
+                                                    count={countFor(topics.map(t => t.id))}
+                                                    onRename={name => handleSaveQSubject({ id: s.id, course_id: s.course_id, name })}
+                                                    onDelete={() => handleDeleteQSubject(s)}
+                                                />
+                                                <div style={{ paddingLeft: 'var(--space-4)', borderLeft: '2px solid var(--border-primary)', marginLeft: 'var(--space-1)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                                                    {topics.length === 0 && <span className="text-xs text-secondary">No topics yet.</span>}
+                                                    {topics.map(t => (
+                                                        <TaxonomyRow
+                                                            key={`${t.id}:${t.name}`}
+                                                            name={t.name}
+                                                            count={countFor([t.id])}
+                                                            onRename={name => handleSaveQTopic({ id: t.id, subject_id: t.subject_id, name })}
+                                                            onDelete={() => handleDeleteQTopic(t)}
+                                                        />
+                                                    ))}
+                                                    <AddNameRow
+                                                        placeholder={`New topic in ${s.name}`}
+                                                        label="Add topic"
+                                                        onAdd={name => handleSaveQTopic({ subject_id: s.id, name })}
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    {subjects.length === 0 && <p className="text-sm text-secondary">{course.name} has no subjects yet.</p>}
+                                    <AddNameRow
+                                        placeholder={`New subject in ${course.name}, e.g. Physics`}
+                                        label="Add subject"
+                                        onAdd={name => handleSaveQSubject({ course_id: course.id, name })}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
+
             {/* ===== IMPORT QUESTIONS MODAL ===== */}
             {importOpen && (
                 <div className="modal-overlay" onClick={() => !importing && setImportOpen(false)}>
@@ -2091,7 +2506,7 @@ export default function AdminPage() {
 
                         <div className="input-group" style={{ marginBottom: 'var(--space-3)' }}>
                             <label>Course *</label>
-                            <select className="select" value={importCourseName} onChange={e => { setImportCourseName(e.target.value); setImportLessonId(null); }}>
+                            <select className="select" value={importCourseName} onChange={e => { setImportCourseName(e.target.value); setImportLessonId(null); setImportTopicId(null); }}>
                                 <option value="">Select a course…</option>
                                 {courses.map(c => (
                                     <option key={c.id} value={c.name}>{c.name}</option>
@@ -2102,6 +2517,18 @@ export default function AdminPage() {
                         <div className="input-group" style={{ marginBottom: 'var(--space-3)' }}>
                             <label htmlFor="import-quiz">Module › Quiz</label>
                             <QuizSelect id="import-quiz" places={places} courseName={importCourseName} value={importLessonId} onChange={setImportLessonId} />
+                        </div>
+
+                        <div className="input-group" style={{ marginBottom: 'var(--space-3)' }}>
+                            <label htmlFor="import-topic">Subject › Topic</label>
+                            <TopicSelect
+                                id="import-topic"
+                                courseId={courses.find(c => c.name === importCourseName)?.id}
+                                subjects={qSubjects}
+                                topics={qTopics}
+                                value={importTopicId}
+                                onChange={setImportTopicId}
+                            />
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
@@ -2124,7 +2551,7 @@ export default function AdminPage() {
                         </div>
 
                         <p className="text-xs text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
-                            Every question in the file goes into the selected course{importLessonId ? ' and quiz' : ' bank'}, with this difficulty and source (each can be changed later per question). Each quiz&apos;s <code>quiz_title</code> becomes the topic. LOCOMOTIVE questions are only available to paid students in Create Test.
+                            Every question in the file goes into the selected course{importLessonId ? ' and quiz' : ' bank'}{importTopicId ? ' and topic' : ''}, with this difficulty and source (each can be changed later per question). {importTopicId ? '' : 'With no topic chosen, they can be moved into topics later from the question list. '}LOCOMOTIVE questions are only available to paid students in Create Test.
                         </p>
 
                         <input

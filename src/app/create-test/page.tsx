@@ -3,12 +3,35 @@
 import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { useRouter } from 'next/navigation';
-import { Clock, Infinity, Check, ArrowRight, Loader2, Lock } from 'lucide-react';
+import { Clock, Infinity, Check, ArrowRight, Loader2, Lock, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { useAbortController, isAbortError } from '@/hooks/useAbortController';
-import { getCourses, getQuestions, CourseWithModules } from '@/lib/api';
+import { getQuestionTopicTree, drawQuestions, PickerCourse } from '@/lib/api';
+import { topicKey, untaggedKey, subjectKeys, courseKeys, pickFrom, pickLabel } from './topicPick';
 import './create-test.css';
+
+/** Checkbox for a group of keys: ticked, empty, or a dash when partly picked. */
+function GroupCheckbox({ keys, selected, onToggle, label }: {
+    keys: string[];
+    selected: Set<string>;
+    onToggle: (keys: string[]) => void;
+    label: string;
+}) {
+    const n = keys.filter(k => selected.has(k)).length;
+    return (
+        <input
+            type="checkbox"
+            className="ct-check"
+            aria-label={label}
+            checked={n > 0 && n === keys.length}
+            ref={el => { if (el) el.indeterminate = n > 0 && n < keys.length; }}
+            onChange={() => onToggle(keys)}
+        />
+    );
+}
+
+const countLabel = (n: number | null) => n === null ? '' : `${n} question${n === 1 ? '' : 's'}`;
 
 export default function CreateTestPage() {
     const router = useRouter();
@@ -19,11 +42,12 @@ export default function CreateTestPage() {
     // premium-sourced ones) regardless of plan, so they can QA content.
     const isPaidPlan = !!profile?.admin_role || (!!profile?.plan && profile.plan !== 'free-trial');
     const [mode, setMode] = useState<'timed' | 'untimed'>('timed');
-    const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
+    const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [questionCount, setQuestionCount] = useState(60);
     const [difficulty, setDifficulty] = useState<'all' | 'easy' | 'medium' | 'hard'>('all');
     const [source, setSource] = useState<'all' | 'official-imat' | 'locomotive-original' | 'italian-medical'>('all');
-    const [courses, setCourses] = useState<CourseWithModules[]>([]);
+    const [tree, setTree] = useState<PickerCourse[]>([]);
     const [loading, setLoading] = useState(true);
     const [starting, setStarting] = useState(false);
     // Why a test couldn't start, so we explain instead of dead-ending on an
@@ -32,17 +56,20 @@ export default function CreateTestPage() {
     const [notice, setNotice] = useState<{ text: string; upgrade: boolean } | null>(null);
     // Optional; blank uses the generated name below. Renamable later in Previous Tests.
     const [testName, setTestName] = useState('');
-    const defaultName = `Custom Test - ${selectedSubjects.length > 0 ? selectedSubjects.join(', ') : 'All Subjects'}`;
+    const label = pickLabel(tree, selected);
+    const defaultName = `Custom Test - ${label}`;
 
     useEffect(() => {
         const signal = getSignal();
         async function load() {
             try {
-                const data = await getCourses(supabase, undefined, signal);
-                setCourses(data);
+                const data = await getQuestionTopicTree(supabase, signal);
+                setTree(data);
+                // With a single course, open it so its topics are in view.
+                if (data.length === 1) setExpanded(new Set([data[0].id]));
             } catch (err) {
                 if (isAbortError(err)) return;
-                console.error('Error fetching courses:', err);
+                console.error('Error fetching topics:', err);
             } finally {
                 setLoading(false);
             }
@@ -50,40 +77,47 @@ export default function CreateTestPage() {
         load();
     }, [supabase, getSignal]);
 
-    const toggleSubject = (name: string) => {
-        setSelectedSubjects(prev =>
-            prev.includes(name) ? prev.filter(s => s !== name) : [...prev, name]
-        );
+    /** Tick every key in the group, or untick them all if they're all ticked. */
+    const toggleKeys = (keys: string[]) => {
+        setNotice(null);
+        setSelected(prev => {
+            const next = new Set(prev);
+            const all = keys.every(k => next.has(k));
+            for (const k of keys) {
+                if (all) next.delete(k);
+                else next.add(k);
+            }
+            return next;
+        });
     };
+
+    const toggleExpanded = (id: string) => setExpanded(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+    });
 
     const startTest = async () => {
         setStarting(true);
         setNotice(null);
-        // Fetch questions matching filters
-        const subjectNames = selectedSubjects.length > 0 ? selectedSubjects : undefined;
         try {
-            const questions = await getQuestions(supabase, {
-                subjects: subjectNames,
-                difficulty: difficulty,
-                source: source,
-                limit: questionCount * 2, // Overfetch slightly to allow client-side filtering if needed
+            const { questions: finalQuestions, matched } = await drawQuestions(supabase, {
+                pick: pickFrom(tree, selected),
+                difficulty,
+                source,
+                count: questionCount,
+                // Free plans don't get LOCOMOTIVE Original questions.
+                includePremium: isPaidPlan,
             });
-
-            // Filter out premium questions if user is on free plan
-            let finalQuestions = questions;
-            if (!isPaidPlan) {
-                finalQuestions = finalQuestions.filter(q => q.source !== 'locomotive-original');
-            }
-
-            finalQuestions = finalQuestions.slice(0, questionCount);
 
             // Nothing to start — explain why instead of pushing the user to an
             // empty test page. If raw matches existed but the premium filter
             // removed them all, point to unlocking rather than "no questions".
             if (finalQuestions.length === 0) {
-                setNotice(questions.length > 0
+                setNotice(matched > 0
                     ? { text: 'These questions are premium — unlock this course to practice them.', upgrade: true }
-                    : { text: 'No questions match these filters yet. Try different subjects or difficulty.', upgrade: false });
+                    : { text: 'No questions match these filters yet. Try different topics or difficulty.', upgrade: false });
                 setStarting(false);
                 return;
             }
@@ -160,26 +194,103 @@ export default function CreateTestPage() {
                     </div>
                 </div>
 
-                {/* Subject Selection */}
+                {/* Topic Selection: Course › Subject › Topic */}
                 <div className="ct-section">
-                    <h2 className="ct-section-title">Subjects</h2>
-                    <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)' }}>Select one or more subjects</p>
-                    <div className="ct-subjects-grid">
-                        {courses.map(course => (
-                            <button
-                                key={course.id}
-                                className={`ct-subject-btn ${selectedSubjects.includes(course.name) ? 'active' : ''}`}
-                                onClick={() => toggleSubject(course.name)}
-                                style={{ '--subject-color': course.color } as React.CSSProperties}
-                            >
-                                <span className="ct-subject-icon">{course.icon}</span>
-                                <span>{course.name}</span>
-                                {selectedSubjects.includes(course.name) && (
-                                    <div className="ct-subject-check"><Check size={12} /></div>
-                                )}
-                            </button>
-                        ))}
+                    <div className="ct-section-head">
+                        <h2 className="ct-section-title">Topics</h2>
+                        {selected.size > 0 && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear</button>
+                        )}
                     </div>
+                    <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
+                        Pick whole courses, subjects or single topics. Leave everything unticked to use all topics.
+                    </p>
+                    {tree.length === 0 ? (
+                        <p className="text-sm text-secondary">No questions yet.</p>
+                    ) : (
+                        <div className="ct-topic-tree">
+                            {tree.map(course => {
+                                const keys = courseKeys(course);
+                                const picked = keys.filter(k => selected.has(k)).length;
+                                const total = course.untagged === null ? null
+                                    : course.untagged + course.subjects.reduce((n, s) => n + s.topics.reduce((m, t) => m + (t.count ?? 0), 0), 0);
+                                const canExpand = course.subjects.length > 0;
+                                const open = canExpand && expanded.has(course.id);
+                                const bodyId = `ct-course-${course.id}`;
+                                return (
+                                    <div
+                                        key={course.id}
+                                        className={`ct-course ${picked > 0 ? 'picked' : ''}`}
+                                        style={{ '--subject-color': course.color } as React.CSSProperties}
+                                    >
+                                        <div className="ct-course-head">
+                                            <GroupCheckbox keys={keys} selected={selected} onToggle={toggleKeys} label={`All of ${course.name}`} />
+                                            <button
+                                                className="ct-course-name"
+                                                onClick={() => canExpand ? toggleExpanded(course.id) : toggleKeys(keys)}
+                                                aria-expanded={canExpand ? open : undefined}
+                                                aria-controls={canExpand ? bodyId : undefined}
+                                            >
+                                                <span className="ct-subject-icon">{course.icon}</span>
+                                                <span className="ct-course-title">{course.name}</span>
+                                                {picked > 0 && picked < keys.length && (
+                                                    <span className="ct-course-picked">{picked} of {keys.length} picked</span>
+                                                )}
+                                                <span className="ct-count">{countLabel(total)}</span>
+                                                {canExpand && <ChevronDown size={18} className={`ct-chevron ${open ? 'open' : ''}`} />}
+                                            </button>
+                                        </div>
+                                        {open && (
+                                            <div className="ct-course-body" id={bodyId}>
+                                                {course.subjects.map(subject => (
+                                                    <div key={subject.id} className="ct-subject">
+                                                        <label className="ct-subject-head">
+                                                            <GroupCheckbox keys={subjectKeys(subject)} selected={selected} onToggle={toggleKeys} label={`All of ${subject.name}`} />
+                                                            <span>{subject.name}</span>
+                                                        </label>
+                                                        <div className="ct-topic-chips">
+                                                            {subject.topics.map(topic => {
+                                                                const on = selected.has(topicKey(topic.id));
+                                                                return (
+                                                                    <button
+                                                                        key={topic.id}
+                                                                        className={`ct-topic-chip ${on ? 'active' : ''}`}
+                                                                        aria-pressed={on}
+                                                                        onClick={() => toggleKeys([topicKey(topic.id)])}
+                                                                    >
+                                                                        {on && <Check size={12} />}
+                                                                        {topic.name}
+                                                                        {topic.count !== null && <span className="ct-count">{topic.count}</span>}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {course.untagged !== 0 && (() => {
+                                                    const on = selected.has(untaggedKey(course.name));
+                                                    return (
+                                                        <div className="ct-topic-chips">
+                                                            <button
+                                                                className={`ct-topic-chip ct-topic-other ${on ? 'active' : ''}`}
+                                                                aria-pressed={on}
+                                                                onClick={() => toggleKeys([untaggedKey(course.name)])}
+                                                                title="Questions in this course that aren't in a topic yet"
+                                                            >
+                                                                {on && <Check size={12} />}
+                                                                Other {course.name} questions
+                                                                {course.untagged !== null && <span className="ct-count">{course.untagged}</span>}
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
 
                 {/* Question Pool */}
@@ -267,7 +378,7 @@ export default function CreateTestPage() {
                             <span>•</span>
                             <span>{mode === 'timed' ? `${Math.round(questionCount * 100 / 60)} min` : 'Untimed'}</span>
                             <span>•</span>
-                            <span>{selectedSubjects.length === 0 ? 'All subjects' : `${selectedSubjects.length} subjects`}</span>
+                            <span>{label}</span>
                         </div>
                     </div>
                     <button className="btn btn-primary btn-lg" onClick={startTest} disabled={starting}>

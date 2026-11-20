@@ -67,56 +67,157 @@
     justify-content: center;
 }
 
-/* Subjects */
-.ct-subjects-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
+/* Topics: Course › Subject › Topic */
+.ct-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: var(--space-3);
 }
 
-.ct-subject-btn {
+.ct-section-head .ct-section-title {
+    margin-bottom: var(--space-2);
+}
+
+.ct-topic-tree {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
+}
+
+.ct-course {
     background: var(--bg-card);
     border: 1px solid var(--border-primary);
     border-radius: var(--radius-md);
+    transition: border-color var(--transition-fast);
+}
+
+.ct-course.picked {
+    border-color: var(--subject-color, var(--brand-accent));
+}
+
+.ct-course-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 0 var(--space-4);
+}
+
+.ct-check {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    flex-shrink: 0;
+    accent-color: var(--brand-accent);
     cursor: pointer;
-    color: var(--text-secondary);
+}
+
+.ct-course-name {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) 0;
+    background: none;
+    border: none;
+    color: var(--text-primary);
     font-family: var(--font-sans);
     font-size: var(--fs-base);
-    transition: all var(--transition-fast);
-    position: relative;
+    text-align: left;
+    cursor: pointer;
 }
 
-.ct-subject-btn:hover {
-    border-color: var(--subject-color);
-    color: var(--text-primary);
+.ct-course-title {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.ct-subject-btn.active {
-    border-color: var(--subject-color);
-    background: color-mix(in srgb, var(--subject-color) 10%, transparent);
-    color: var(--text-primary);
+.ct-course-picked {
+    font-size: var(--fs-xs);
+    color: var(--brand-accent);
+    white-space: nowrap;
+}
+
+.ct-count {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.ct-course-name > .ct-count {
+    margin-left: auto;
+}
+
+.ct-chevron {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    transition: transform var(--transition-fast);
+}
+
+.ct-chevron.open {
+    transform: rotate(180deg);
 }
 
 .ct-subject-icon {
     font-size: 1.2rem;
 }
 
-.ct-subject-check {
-    position: absolute;
-    top: -6px;
-    right: -6px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: var(--brand-accent);
-    color: white;
+.ct-course-body {
     display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    border-top: 1px solid var(--border-primary);
+}
+
+.ct-subject-head {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ct-topic-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding-left: calc(18px + var(--space-3));
+}
+
+.ct-topic-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-full);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.ct-topic-chip:hover {
+    border-color: var(--border-accent);
+    color: var(--text-primary);
+}
+
+.ct-topic-chip.active {
+    background: rgba(37, 99, 235, 0.12);
+    border-color: var(--brand-accent);
+    color: var(--text-primary);
+}
+
+.ct-topic-other {
+    border-style: dashed;
 }
 
 /* Pool */
@@ -238,7 +339,6 @@
 @media (max-width: 768px) {
 
     .ct-mode-grid,
-    .ct-subjects-grid,
     .ct-pool-grid,
     .ct-settings-row {
         grid-template-columns: 1fr;
