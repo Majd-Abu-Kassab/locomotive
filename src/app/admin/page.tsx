@@ -16,6 +16,7 @@ import { useToast } from '@/components/Toast';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { isAbortError } from '@/hooks/useAbortController';
 import { toRichText, toPlainText } from '@/lib/richText';
+import { bunnyConfigured, forgetBunnyVideo, uploadLessonVideo, VIDEO_EXTENSIONS } from '@/lib/bunnyUpload';
 import {
     getCourses, getAllQuestions,
     adminSaveCourse, adminDeleteCourse,
@@ -266,6 +267,8 @@ export default function AdminPage() {
 
     // Content upload state
     const [uploadingContent, setUploadingContent] = useState(false);
+    const [uploadPercent, setUploadPercent] = useState<number | null>(null); // video uploads to Bunny
+    const [bunnyReady, setBunnyReady] = useState(false); // videos go to Bunny Stream
     const [contentCourseId, setContentCourseId] = useState('');
     const [contentTopicId, setContentTopicId] = useState('');
 
@@ -441,6 +444,22 @@ export default function AdminPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tab, qSortBy, supabase]);
 
+    // Whether lesson videos go to Bunny Stream (its keys are set on the server).
+    useEffect(() => {
+        if (!profile?.admin_role) return;
+        let cancelled = false;
+        bunnyConfigured().then(ready => { if (!cancelled) setBunnyReady(ready); });
+        return () => { cancelled = true; };
+    }, [profile?.admin_role]);
+
+    // Leaving the page would stop an upload in progress.
+    useEffect(() => {
+        if (!uploadingContent) return;
+        const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+        window.addEventListener('beforeunload', warn);
+        return () => window.removeEventListener('beforeunload', warn);
+    }, [uploadingContent]);
+
     // Auth is still resolving (initial session/profile fetch) — don't judge
     // admin status yet, or we'll flash "Access Denied" on every load/expired
     // session before we actually know who the user is.
@@ -496,10 +515,17 @@ export default function AdminPage() {
         setSavingCourse(false);
     };
 
+    // Content of lessons about to be deleted: their videos on Bunny are then
+    // deleted too (the server skips any another lesson still plays).
+    const lessonContent = (match: (courseId: string, moduleId: string, topicId: string) => boolean) =>
+        courses.flatMap(c => c.modules.flatMap(m => m.topics.filter(t => match(c.id, m.id, t.id)).map(t => t.content_url)));
+
     const handleDeleteCourse = async (courseId: string) => {
         if (!confirm('Delete this course and all its data?')) return;
+        const content = lessonContent(c => c === courseId);
         const { error } = await adminDeleteCourse(supabase, courseId);
         if (error) { addToast(error.message, 'error'); } else {
+            content.forEach(forgetBunnyVideo);
             addToast('Course deleted', 'success');
             setCourses(prev => prev.filter(c => c.id !== courseId));
             if (taxonomyCourseId === courseId) setTaxonomyCourseId('');
@@ -528,8 +554,10 @@ export default function AdminPage() {
 
     const handleDeleteModule = async (moduleId: string) => {
         if (!confirm('Delete this module and all its topics?')) return;
+        const content = lessonContent((_, m) => m === moduleId);
         const { error } = await adminDeleteModule(supabase, moduleId);
         if (error) { addToast(error.message, 'error'); } else {
+            content.forEach(forgetBunnyVideo);
             addToast('Module deleted', 'success');
             setCourses(await getCourses(supabase));
         }
@@ -559,8 +587,10 @@ export default function AdminPage() {
 
     const handleDeleteTopic = async (topicId: string) => {
         if (!confirm('Delete this topic?')) return;
+        const content = lessonContent((_, __, t) => t === topicId);
         const { error } = await adminDeleteTopic(supabase, topicId);
         if (error) { addToast(error.message, 'error'); } else {
+            content.forEach(forgetBunnyVideo);
             addToast('Topic deleted', 'success');
             setCourses(await getCourses(supabase));
         }
@@ -792,15 +822,35 @@ export default function AdminPage() {
 
     const handleContentUpload = async (file: File) => {
         if (!contentCourseId || !contentTopicId) { addToast('Select course and topic first', 'error'); return; }
+        if (uploadingContent) return;
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        const isVideo = VIDEO_EXTENSIONS.includes(ext);
+        const previous = lessonContent((_, __, t) => t === contentTopicId)[0];
         setUploadingContent(true);
+
+        // Videos go straight to Bunny Stream when it's set up (any size).
+        if (isVideo && bunnyReady) {
+            setUploadPercent(0);
+            try {
+                await uploadLessonVideo(contentTopicId, file, setUploadPercent);
+                addToast('Video uploaded! Bunny is preparing it; it plays in a few minutes.', 'success');
+                setCourses(await getCourses(supabase));
+            } catch (err) {
+                addToast(err instanceof Error ? err.message : 'The upload failed.', 'error');
+            }
+            setUploadPercent(null);
+            setUploadingContent(false);
+            return;
+        }
+
         const { url, error } = await adminUploadCourseContent(supabase, file, contentCourseId, contentTopicId);
         if (error) { addToast(error.message, 'error'); setUploadingContent(false); return; }
         if (url) {
-            const ext = file.name.split('.').pop()?.toLowerCase();
-            const contentType = ext === 'pdf' ? 'pdf' : (ext === 'pptx' || ext === 'ppt') ? 'presentation' : ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext || '') ? 'video' : 'file';
+            const contentType = ext === 'pdf' ? 'pdf' : (ext === 'pptx' || ext === 'ppt') ? 'presentation' : isVideo ? 'video' : 'file';
             const { error: updateErr } = await adminUpdateTopicContent(supabase, contentTopicId, url, contentType);
             if (updateErr) { addToast(updateErr.message, 'error'); }
             else {
+                forgetBunnyVideo(previous); // a Bunny video this file replaced
                 const label = contentType === 'pdf' ? 'PDF' : contentType === 'video' ? 'Video' : 'Presentation';
                 addToast(`${label} uploaded successfully!`, 'success');
                 setCourses(await getCourses(supabase));
@@ -1129,7 +1179,9 @@ export default function AdminPage() {
                                 <Upload size={18} /> Upload Content (Videos, PDFs, Presentations)
                             </h3>
                             <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-4)' }}>
-                                Upload videos, PDF study materials, or PowerPoint presentations to any topic. Max 50MB per file.
+                                {bunnyReady
+                                    ? 'Upload videos, PDF study materials, or PowerPoint presentations to any topic. Videos can be any size: they go to Bunny Stream, which streams them in the right quality for each student’s connection. PDFs and presentations: max 50MB.'
+                                    : 'Upload videos, PDF study materials, or PowerPoint presentations to any topic. Max 50MB per file.'}
                             </p>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
                                 <div className="input-group">
@@ -1175,7 +1227,7 @@ export default function AdminPage() {
                                     if (!contentCourseId || !contentTopicId) return;
                                     const input = document.createElement('input');
                                     input.type = 'file';
-                                    input.accept = '.pdf,.pptx,.ppt,.mp4,.webm,.mov,.avi,.mkv';
+                                    input.accept = ['.pdf', '.pptx', '.ppt', ...VIDEO_EXTENSIONS.map(e => `.${e}`)].join(',');
                                     input.onchange = (e) => {
                                         const file = (e.target as HTMLInputElement).files?.[0];
                                         if (file) handleContentUpload(file);
@@ -1186,13 +1238,17 @@ export default function AdminPage() {
                                 {uploadingContent ? (
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-3)' }}>
                                         <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--brand-accent-light)' }} />
-                                        <span>Uploading...</span>
+                                        {uploadPercent === null
+                                            ? <span>Uploading...</span>
+                                            : <span role="status">Uploading video… {uploadPercent}%. Keep this page open.</span>}
                                     </div>
                                 ) : (
                                     <>
                                         <Upload size={32} style={{ color: 'var(--text-tertiary)', marginBottom: 'var(--space-2)' }} />
                                         <p style={{ fontWeight: 600, marginBottom: 'var(--space-1)' }}>Drop file here or click to browse</p>
-                                        <p className="text-xs text-secondary">MP4, WebM, MOV, PDF, PPTX • Max 50MB</p>
+                                        <p className="text-xs text-secondary">
+                                            {bunnyReady ? 'Videos (MP4, WebM, MOV…): any size • PDF, PPTX: max 50MB' : 'MP4, WebM, MOV, PDF, PPTX • Max 50MB'}
+                                        </p>
                                     </>
                                 )}
                             </div>
@@ -1218,6 +1274,7 @@ export default function AdminPage() {
                                                     {t.content_type === 'video' ? <Video size={14} style={{ color: '#ef4444' }} /> : <FileText size={14} style={{ color: 'var(--color-warning)' }} />}
                                                     <strong>{t.name}</strong>
                                                     <span className="badge" style={{ fontSize: 9 }}>{t.content_type}</span>
+                                                    {t.content_url?.startsWith('bunny:') && <span className="badge badge-accent" style={{ fontSize: 9 }} title="Streamed by Bunny Stream">Bunny</span>}
                                                 </span>
                                                 {/* Files are private; the lesson page fetches a signed link. */}
                                                 <a href={`/courses/${encodeURIComponent(contentCourseId)}/${encodeURIComponent(t.id)}`} target="_blank" rel="noopener noreferrer" className="text-accent" style={{ fontSize: 'var(--fs-xs)' }}>

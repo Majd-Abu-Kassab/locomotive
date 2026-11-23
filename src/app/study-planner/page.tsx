@@ -7,7 +7,8 @@ import { Loader2 } from 'lucide-react';
 import './study-planner.css';
 
 const PLANNER = '/embed/study-planner.html';
-// Events the platform's inactivity timer listens for (ActivityHeartbeat).
+// The interaction events the platform's inactivity timer listens for
+// (ActivityHeartbeat); the planner has no video, so 'timeupdate' isn't needed.
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'scroll', 'wheel', 'touchstart'] as const;
 
 /**
