@@ -88,21 +88,18 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
         getCourses(supabase).then(setCourses).catch(console.error);
     }, [supabase]);
 
-    // Dynamically insert courses into the STUDY category
-    const navItems = baseNavItems.map(section => {
-        if (section.category === 'STUDY') {
-            const dynamicCourses = courses.map(course => ({
-                name: course.name,
-                href: `/courses/${course.id}`,
-                emoji: course.icon || '📚',
-            }));
-            return {
-                ...section,
-                items: [...section.items, ...dynamicCourses]
-            };
-        }
-        return section;
-    });
+    // The courses get their own section, between CORE and STUDY (hidden
+    // until they've loaded, so there's never an empty heading).
+    const courseItems = courses.map(course => ({
+        name: course.name,
+        href: `/courses/${course.id}`,
+        emoji: course.icon || '📚',
+    }));
+    const navItems = baseNavItems.flatMap(section =>
+        section.category === 'STUDY' && courseItems.length > 0
+            ? [{ category: 'CORE COURSES', items: courseItems }, section]
+            : [section]
+    );
 
     return (
         <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileMenuOpen ? 'mobile-open' : ''}`}>
