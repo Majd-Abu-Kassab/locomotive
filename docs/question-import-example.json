@@ -1,6 +1,8 @@
 [
   {
     "quiz_title": "Number System",
+    "subject": "Mathematics",
+    "topic": "Number System",
     "questions": [
       {
         "title": "Real numbers",
@@ -30,6 +32,8 @@
       },
       {
         "title": "Moles of water",
+        "subject": "Chemistry",
+        "topic": "Stoichiometry",
         "content": "How many moles of water are produced when 4 mol of $H_2$ react completely with excess $O_2$?\n\n$$2H_2 + O_2 \\rightarrow 2H_2O$$",
         "options": ["2 mol", "4 mol", "6 mol", "8 mol", "1 mol"],
         "correct": 1,
@@ -37,6 +41,8 @@
       },
       {
         "title": "Average speed",
+        "subject": "Physics",
+        "topic": "Kinematics",
         "content": "A car travels 120 km in 1.5 hours. What is its average speed?",
         "options": ["80 km/h", "60 km/h", "90 km/h", "120 km/h", "180 km/h"],
         "correct": 0,

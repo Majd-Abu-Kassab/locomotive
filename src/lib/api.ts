@@ -686,6 +686,70 @@ export async function adminDeleteQuestionTopic(supabase: SupabaseClient, id: str
     return { error: error ? new Error(error.message) : null };
 }
 
+/** How subject and topic names are compared: ignoring case and extra spaces. */
+export const taxonomyKey = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+/** One key for a Subject › Topic pair. */
+export const subjectTopicKey = (subject: string, topic: string) => `${taxonomyKey(subject)}\u0000${taxonomyKey(topic)}`;
+
+/**
+ * For a question import: makes sure each Subject › Topic exists in the
+ * course, adding the missing ones (an existing name in different case is
+ * reused, not duplicated), and returns each pair's topic by subjectTopicKey.
+ */
+export async function adminEnsureQuestionTopics(
+    supabase: SupabaseClient,
+    courseId: string,
+    pairs: { subject: string; topic: string }[],
+): Promise<{ topics: Map<string, { id: string; name: string }>; addedSubjects: number; addedTopics: number; error: Error | null }> {
+    const topics = new Map<string, { id: string; name: string }>();
+    const fail = (message: string) => ({ topics, addedSubjects: 0, addedTopics: 0, error: new Error(message) });
+    if (pairs.length === 0) return { topics, addedSubjects: 0, addedTopics: 0, error: null };
+
+    // Subjects: find each one in the course, adding the ones that are missing.
+    const loadSubjects = () => supabase.from('question_subjects').select('id, name').eq('course_id', courseId);
+    let subj = await loadSubjects();
+    if (subj.error) return fail(subj.error.message);
+    const missingSubjects = [...new Map(pairs
+        .filter(p => !subj.data!.some(s => taxonomyKey(s.name) === taxonomyKey(p.subject)))
+        .map(p => [taxonomyKey(p.subject), p.subject.trim().replace(/\s+/g, ' ')])).values()];
+    if (missingSubjects.length) {
+        const add = await supabase.from('question_subjects')
+            .upsert(missingSubjects.map(name => ({ course_id: courseId, name })), { onConflict: 'course_id,name', ignoreDuplicates: true });
+        if (add.error) return fail(add.error.message);
+        subj = await loadSubjects();
+        if (subj.error) return fail(subj.error.message);
+    }
+    const subjectId = new Map(subj.data!.map(s => [taxonomyKey(s.name), s.id]));
+
+    // Topics: the same, within each subject.
+    const subjectIds = [...new Set(pairs.map(p => subjectId.get(taxonomyKey(p.subject))).filter((id): id is string => !!id))];
+    const loadTopics = () => supabase.from('question_topics').select('id, subject_id, name').in('subject_id', subjectIds);
+    let top = await loadTopics();
+    if (top.error) return fail(top.error.message);
+    const find = (p: { subject: string; topic: string }) => {
+        const sid = subjectId.get(taxonomyKey(p.subject));
+        return top.data!.find(t => t.subject_id === sid && taxonomyKey(t.name) === taxonomyKey(p.topic));
+    };
+    const missingTopics = [...new Map(pairs.filter(p => !find(p)).map(p => [subjectTopicKey(p.subject, p.topic), {
+        subject_id: subjectId.get(taxonomyKey(p.subject))!,
+        name: p.topic.trim().replace(/\s+/g, ' '),
+    }])).values()];
+    if (missingTopics.some(t => !t.subject_id)) return fail('Couldn’t add a subject for these questions.');
+    if (missingTopics.length) {
+        const add = await supabase.from('question_topics').upsert(missingTopics, { onConflict: 'subject_id,name', ignoreDuplicates: true });
+        if (add.error) return fail(add.error.message);
+        top = await loadTopics();
+        if (top.error) return fail(top.error.message);
+    }
+
+    for (const p of pairs) {
+        const t = find(p);
+        if (!t) return fail(`Couldn’t add the topic “${p.subject} › ${p.topic}”.`);
+        topics.set(subjectTopicKey(p.subject, p.topic), { id: t.id, name: t.name });
+    }
+    return { topics, addedSubjects: missingSubjects.length, addedTopics: missingTopics.length, error: null };
+}
+
 /**
  * Put questions in a topic, or take them out of theirs (target null). A topic
  * belongs to one course, so questions from another course move to that

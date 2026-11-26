@@ -22,7 +22,7 @@ import {
     adminSaveCourse, adminDeleteCourse,
     adminSaveQuestion, adminDeleteQuestion, adminBulkImportQuestions, adminMoveQuestions, adminDeleteQuestions,
     getQuestionTaxonomy, adminSaveQuestionSubject, adminDeleteQuestionSubject, adminSaveQuestionTopic, adminDeleteQuestionTopic,
-    adminSetQuestionsTopic, QuestionSubjectRow, QuestionTopicRow,
+    adminSetQuestionsTopic, QuestionSubjectRow, QuestionTopicRow, adminEnsureQuestionTopics, subjectTopicKey, taxonomyKey,
     adminSaveSection, adminDeleteSection, adminAssignModulesToSection, adminUpdateCoursePaymentSettings,
     adminGetAllStudentAccess, adminGrantAccess, adminRevokeAccess,
     adminGetAllPayments, adminGetCoupons, adminSaveCoupon, adminToggleCoupon,
@@ -40,7 +40,14 @@ import {
 type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'analytics' | 'team' | 'notifications' | 'support';
 
 // ── JSON question-import helpers ──
-interface ParsedItem { topic: string; stem: string; options: string[]; correct: number; explanation: string; }
+interface ParsedItem {
+    topic: string; // the quiz_title label (kept as the topic text when the question gets no topic)
+    tag?: { subject: string; topic: string }; // Subject › Topic named in the file
+    stem: string;
+    options: string[];
+    correct: number;
+    explanation: string;
+}
 
 
 function slugify(s: string): string {
@@ -169,8 +176,21 @@ function AddNameRow({ placeholder, label, onAdd }: { placeholder: string; label:
     );
 }
 
+// Optional "subject" and "topic" names, which go together: one without the
+// other is an error. Returns undefined when neither is given.
+function readTag(from: unknown, where: string, errors: string[]): { subject: string; topic: string } | null | undefined {
+    const clean = (v: unknown) => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '');
+    const o = (from && typeof from === 'object' ? from : {}) as { subject?: unknown; topic?: unknown };
+    const subject = clean(o.subject), topic = clean(o.topic);
+    if (!subject && !topic) return undefined;
+    if (!subject || !topic) { errors.push(`${where}: give both "subject" and "topic", or neither`); return null; }
+    if (subject.length > 120 || topic.length > 120) { errors.push(`${where}: subject and topic names can be at most 120 characters`); return null; }
+    return { subject, topic };
+}
+
 // Parse an uploaded JSON file into validated question items. Accepts an array
-// of quizzes ([{ quiz_title, questions: [...] }]) or a single quiz object.
+// of quizzes ([{ quiz_title, subject?, topic?, questions: [...] }]) or a single
+// quiz object. A question's own subject + topic replace its quiz's.
 function parseQuestionJson(text: string): { items: ParsedItem[]; errors: string[] } {
     const errors: string[] = [];
     const items: ParsedItem[] = [];
@@ -186,6 +206,8 @@ function parseQuestionJson(text: string): { items: ParsedItem[]; errors: string[
         const topic = String(quiz?.quiz_title || quiz?.title || 'Imported').trim() || 'Imported';
         const qs = Array.isArray(quiz?.questions) ? quiz.questions : (Array.isArray(quiz) ? quiz : null);
         if (!qs) { errors.push(`Quiz ${qi + 1}: missing a "questions" array`); return; }
+        const quizTag = readTag(quiz, `Quiz "${topic}"`, errors);
+        if (quizTag === null) return;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         qs.forEach((q: any, i: number) => {
             const label = q?.title ? `"${q.title}"` : `Quiz ${qi + 1} Q${i + 1}`;
@@ -200,7 +222,9 @@ function parseQuestionJson(text: string): { items: ParsedItem[]; errors: string[
                 errors.push(`${label}: "correct" index ${q?.correct} is out of range (0–${options.length - 1})`);
                 return;
             }
-            items.push({ topic, stem, options, correct, explanation: toRichText(String(q?.explanation ?? '')) });
+            const ownTag = readTag(q, label, errors);
+            if (ownTag === null) return;
+            items.push({ topic, tag: ownTag ?? quizTag, stem, options, correct, explanation: toRichText(String(q?.explanation ?? '')) });
         });
     });
     return { items, errors };
@@ -658,28 +682,49 @@ export default function AdminPage() {
         if (importItems.length === 0) { addToast('No valid questions to import.', 'warning'); return; }
         setImporting(true);
         const importTopic = importTopicId ? topicById.get(importTopicId) : undefined;
-        const rows = importItems.map((it, i) => ({
-            id: `imp-${slugify(courseName)}-${slugify(it.topic)}-${i + 1}-${Math.random().toString(36).slice(2, 6)}`,
-            // subject links the question to its course (question.subject === course.name);
-            // lesson_id puts it in a specific quiz (null = course bank only);
-            // topic_id is its Create Test topic (null = sort later).
-            // source is a fixed provenance vocabulary (DB CHECK) chosen in the form.
-            subject: courseName,
-            lesson_id: importLessonId,
-            topic_id: importTopic?.id ?? null,
-            topic: importTopic?.name ?? it.topic,
-            difficulty: importDifficulty,
-            stem: it.stem,
-            options: it.options,
-            correct_answer: it.correct,
-            explanation: it.explanation,
-            source: importSource,
-            year: null,
-        }));
+
+        // Subject › Topic named in the file: add the ones the course doesn't have yet.
+        const pairs = [...new Map(importItems.filter(it => it.tag).map(it => [subjectTopicKey(it.tag!.subject, it.tag!.topic), it.tag!])).values()];
+        let fileTopics = new Map<string, { id: string; name: string }>();
+        let added = '';
+        if (pairs.length > 0) {
+            const course = courses.find(c => c.name === courseName);
+            if (!course) { addToast('Choose the course again, then import.', 'warning'); setImporting(false); return; }
+            const res = await adminEnsureQuestionTopics(supabase, course.id, pairs);
+            if (res.error) { addToast('Import failed: ' + res.error.message, 'error'); setImporting(false); return; }
+            fileTopics = res.topics;
+            if (res.addedSubjects || res.addedTopics) {
+                added = ` Added ${[res.addedSubjects && plural(res.addedSubjects, 'subject'), res.addedTopics && plural(res.addedTopics, 'topic')].filter(Boolean).join(' and ')} to ${courseName}.`;
+                await reloadTaxonomy();
+            }
+        }
+
+        const rows = importItems.map((it, i) => {
+            // The file's Subject › Topic wins; otherwise the one chosen in the form.
+            const tagged = it.tag ? fileTopics.get(subjectTopicKey(it.tag.subject, it.tag.topic)) : importTopic;
+            return {
+                id: `imp-${slugify(courseName)}-${slugify(it.topic)}-${i + 1}-${Math.random().toString(36).slice(2, 6)}`,
+                // subject links the question to its course (question.subject === course.name);
+                // lesson_id puts it in a specific quiz (null = course bank only);
+                // topic_id is its Create Test topic (null = sort later).
+                // source is a fixed provenance vocabulary (DB CHECK) chosen in the form.
+                subject: courseName,
+                lesson_id: importLessonId,
+                topic_id: tagged?.id ?? null,
+                topic: tagged?.name ?? it.topic,
+                difficulty: importDifficulty,
+                stem: it.stem,
+                options: it.options,
+                correct_answer: it.correct,
+                explanation: it.explanation,
+                source: importSource,
+                year: null,
+            };
+        });
         const { imported, error } = await adminBulkImportQuestions(supabase, rows);
         setImporting(false);
-        if (error) { addToast('Import failed: ' + error.message, 'error'); return; }
-        addToast(`Imported ${imported} question${imported !== 1 ? 's' : ''}.`, 'success');
+        if (error) { addToast('Import failed: ' + error.message + added, 'error'); return; }
+        addToast(`Imported ${imported} question${imported !== 1 ? 's' : ''}.${added}`, 'success');
         const all = await getAllQuestions(supabase);
         setQuestions(all);
         setImportOpen(false);
@@ -2586,6 +2631,9 @@ export default function AdminPage() {
                                 value={importTopicId}
                                 onChange={setImportTopicId}
                             />
+                            <span className="text-xs text-secondary" style={{ marginTop: 4 }}>
+                                For questions that don’t name a <code>subject</code> and <code>topic</code> in the file.
+                            </span>
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
@@ -2608,7 +2656,7 @@ export default function AdminPage() {
                         </div>
 
                         <p className="text-xs text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
-                            Every question in the file goes into the selected course{importLessonId ? ' and quiz' : ' bank'}{importTopicId ? ' and topic' : ''}, with this difficulty and source (each can be changed later per question). {importTopicId ? '' : 'With no topic chosen, they can be moved into topics later from the question list. '}LOCOMOTIVE questions are only available to paid students in Create Test.
+                            Every question in the file goes into the selected course{importLessonId ? ' and quiz' : ' bank'}, with this difficulty and source (each can be changed later per question). Questions get the subject and topic named in the file; any the course doesn’t have yet are added. {importTopicId ? 'Questions that don’t name one get the topic chosen above.' : 'Questions that don’t name one can be moved into topics later from the question list.'} LOCOMOTIVE questions are only available to paid students in Create Test.
                         </p>
 
                         <input
@@ -2625,6 +2673,37 @@ export default function AdminPage() {
                                     <span style={{ color: 'var(--color-success)' }}>{importItems.length} ready</span>
                                     {importErrors.length > 0 && <span style={{ color: 'var(--color-warning)', marginLeft: 8 }}>· {importErrors.length} skipped</span>}
                                 </div>
+                                {/* The Subject › Topic each question will get, and which are new to the course. */}
+                                {importItems.length > 0 && (() => {
+                                    const courseId = courses.find(c => c.name === importCourseName)?.id;
+                                    const groups = new Map<string, { label: string; count: number; isNew: boolean }>();
+                                    for (const it of importItems) {
+                                        let key = 'form', label: string, isNew = false;
+                                        if (it.tag) {
+                                            key = subjectTopicKey(it.tag.subject, it.tag.topic);
+                                            const s = qSubjects.find(x => x.course_id === courseId && taxonomyKey(x.name) === taxonomyKey(it.tag!.subject));
+                                            const t = s && qTopics.find(x => x.subject_id === s.id && taxonomyKey(x.name) === taxonomyKey(it.tag!.topic));
+                                            // An existing one shows as the course spells it.
+                                            label = s && t ? `${s.name} › ${t.name}` : `${it.tag.subject} › ${it.tag.topic}`;
+                                            isNew = !!courseId && !t;
+                                        } else {
+                                            label = importTopicId ? `${topicPath(importTopicId)} (chosen above)` : 'No topic yet';
+                                        }
+                                        const g = groups.get(key) ?? { label, count: 0, isNew };
+                                        g.count++;
+                                        groups.set(key, g);
+                                    }
+                                    return (
+                                        <ul style={{ margin: 'var(--space-2) 0 0', paddingLeft: 18, fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+                                            {[...groups.values()].map(g => (
+                                                <li key={g.label}>
+                                                    {g.label}: {plural(g.count)}
+                                                    {g.isNew && <span className="badge badge-accent" style={{ fontSize: 9, marginLeft: 6 }}>new, will be added</span>}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    );
+                                })()}
                                 {importErrors.length > 0 && (
                                     <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--fs-xs)', color: 'var(--color-warning)' }}>
                                         {importErrors.slice(0, 20).map((er, i) => <li key={i}>{er}</li>)}
