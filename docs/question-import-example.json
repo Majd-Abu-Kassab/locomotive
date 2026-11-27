@@ -3,6 +3,7 @@
     "quiz_title": "Number System",
     "subject": "Mathematics",
     "topic": "Number System",
+    "difficulty": "Medium",
     "questions": [
       {
         "title": "Real numbers",
@@ -43,6 +44,7 @@
         "title": "Average speed",
         "subject": "Physics",
         "topic": "Kinematics",
+        "difficulty": "Easy",
         "content": "A car travels 120 km in 1.5 hours. What is its average speed?",
         "options": ["80 km/h", "60 km/h", "90 km/h", "120 km/h", "180 km/h"],
         "correct": 0,

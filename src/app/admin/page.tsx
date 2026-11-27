@@ -43,6 +43,7 @@ type Tab = 'courses' | 'questions' | 'sections' | 'students' | 'finance' | 'anal
 interface ParsedItem {
     topic: string; // the quiz_title label (kept as the topic text when the question gets no topic)
     tag?: { subject: string; topic: string }; // Subject › Topic named in the file
+    difficulty?: Difficulty; // named in the file; otherwise the one chosen in the form
     stem: string;
     options: string[];
     correct: number;
@@ -176,6 +177,20 @@ function AddNameRow({ placeholder, label, onAdd }: { placeholder: string; label:
     );
 }
 
+type Difficulty = 'easy' | 'medium' | 'hard';
+const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard'];
+
+// Optional "difficulty": easy, medium or hard, in any capitals. Returns
+// undefined when not given, null (with an error) when it's something else.
+function readDifficulty(from: unknown, where: string, errors: string[]): Difficulty | null | undefined {
+    const raw = (from && typeof from === 'object' ? (from as { difficulty?: unknown }).difficulty : undefined);
+    if (raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) return undefined;
+    const value = String(raw).trim().toLowerCase() as Difficulty;
+    if (DIFFICULTIES.includes(value)) return value;
+    errors.push(`${where}: "difficulty" must be easy, medium or hard (not "${String(raw)}")`);
+    return null;
+}
+
 // Optional "subject" and "topic" names, which go together: one without the
 // other is an error. Returns undefined when neither is given.
 function readTag(from: unknown, where: string, errors: string[]): { subject: string; topic: string } | null | undefined {
@@ -208,6 +223,8 @@ function parseQuestionJson(text: string): { items: ParsedItem[]; errors: string[
         if (!qs) { errors.push(`Quiz ${qi + 1}: missing a "questions" array`); return; }
         const quizTag = readTag(quiz, `Quiz "${topic}"`, errors);
         if (quizTag === null) return;
+        const quizDifficulty = readDifficulty(quiz, `Quiz "${topic}"`, errors);
+        if (quizDifficulty === null) return;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         qs.forEach((q: any, i: number) => {
             const label = q?.title ? `"${q.title}"` : `Quiz ${qi + 1} Q${i + 1}`;
@@ -224,7 +241,12 @@ function parseQuestionJson(text: string): { items: ParsedItem[]; errors: string[
             }
             const ownTag = readTag(q, label, errors);
             if (ownTag === null) return;
-            items.push({ topic, tag: ownTag ?? quizTag, stem, options, correct, explanation: toRichText(String(q?.explanation ?? '')) });
+            const ownDifficulty = readDifficulty(q, label, errors);
+            if (ownDifficulty === null) return;
+            items.push({
+                topic, tag: ownTag ?? quizTag, difficulty: ownDifficulty ?? quizDifficulty,
+                stem, options, correct, explanation: toRichText(String(q?.explanation ?? '')),
+            });
         });
     });
     return { items, errors };
@@ -712,7 +734,7 @@ export default function AdminPage() {
                 lesson_id: importLessonId,
                 topic_id: tagged?.id ?? null,
                 topic: tagged?.name ?? it.topic,
-                difficulty: importDifficulty,
+                difficulty: it.difficulty ?? importDifficulty, // the file's, else the form's
                 stem: it.stem,
                 options: it.options,
                 correct_answer: it.correct,
@@ -2644,6 +2666,9 @@ export default function AdminPage() {
                                     <option value="medium">Medium</option>
                                     <option value="hard">Hard</option>
                                 </select>
+                                <span className="text-xs text-secondary" style={{ marginTop: 4 }}>
+                                    For questions without a <code>difficulty</code> in the file.
+                                </span>
                             </div>
                             <div className="input-group">
                                 <label htmlFor="import-source">Source</label>
@@ -2656,7 +2681,7 @@ export default function AdminPage() {
                         </div>
 
                         <p className="text-xs text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
-                            Every question in the file goes into the selected course{importLessonId ? ' and quiz' : ' bank'}, with this difficulty and source (each can be changed later per question). Questions get the subject and topic named in the file; any the course doesn’t have yet are added. {importTopicId ? 'Questions that don’t name one get the topic chosen above.' : 'Questions that don’t name one can be moved into topics later from the question list.'} LOCOMOTIVE questions are only available to paid students in Create Test.
+                            Every question in the file goes into the selected course{importLessonId ? ' and quiz' : ' bank'} with this source, and gets the difficulty given in the file or, if none, the one chosen above (each can be changed later per question). Questions get the subject and topic named in the file; any the course doesn’t have yet are added. {importTopicId ? 'Questions that don’t name one get the topic chosen above.' : 'Questions that don’t name one can be moved into topics later from the question list.'} LOCOMOTIVE questions are only available to paid students in Create Test.
                         </p>
 
                         <input
@@ -2693,15 +2718,26 @@ export default function AdminPage() {
                                         g.count++;
                                         groups.set(key, g);
                                     }
+                                    // How many questions get each difficulty (the file's, else the form's).
+                                    const levels = DIFFICULTIES.map(d => ({
+                                        d,
+                                        fromFile: importItems.filter(it => it.difficulty === d).length,
+                                        fromForm: d === importDifficulty ? importItems.filter(it => !it.difficulty).length : 0,
+                                    })).filter(l => l.fromFile + l.fromForm > 0);
                                     return (
-                                        <ul style={{ margin: 'var(--space-2) 0 0', paddingLeft: 18, fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
-                                            {[...groups.values()].map(g => (
-                                                <li key={g.label}>
-                                                    {g.label}: {plural(g.count)}
-                                                    {g.isNew && <span className="badge badge-accent" style={{ fontSize: 9, marginLeft: 6 }}>new, will be added</span>}
-                                                </li>
-                                            ))}
-                                        </ul>
+                                        <>
+                                            <ul style={{ margin: 'var(--space-2) 0 0', paddingLeft: 18, fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+                                                {[...groups.values()].map(g => (
+                                                    <li key={g.label}>
+                                                        {g.label}: {plural(g.count)}
+                                                        {g.isNew && <span className="badge badge-accent" style={{ fontSize: 9, marginLeft: 6 }}>new, will be added</span>}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                            <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)' }}>
+                                                Difficulty: {levels.map(l => `${l.fromFile + l.fromForm} ${l.d}${l.fromForm ? ` (${l.fromFile ? `${l.fromForm} ` : ''}chosen above)` : ''}`).join(' · ')}
+                                            </p>
+                                        </>
                                     );
                                 })()}
                                 {importErrors.length > 0 && (
